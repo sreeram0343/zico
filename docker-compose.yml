@@ -1,0 +1,11 @@
+services:
+  postgres:
+    image: postgres:16
+    ports: ["5432:5432"]
+    environment: [POSTGRES_USER=user, POSTGRES_PASSWORD=pass, POSTGRES_DB=zico]
+  qdrant:
+    image: qdrant/qdrant
+    ports: ["6333:6333"]
+  redis:
+    image: redis:7
+    ports: ["6379:6379"]
