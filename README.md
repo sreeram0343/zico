@@ -1,3 +1,5 @@
+<img width="1536" height="1024" alt="ChatGPT Image Aug 15, 2026, 11_51_54 AM" src="https://github.com/user-attachments/assets/bfb73130-4ae3-4063-be5f-c0adc2076d78" />
+
 # ZICO: Intelligent Travel Operations System
 
 ZICO (Speak. Plan. Go.) is a voice-first, context-aware AI travel companion designed to manage the entire lifecycle of a journey. Unlike traditional chatbots that provide static recommendations, ZICO maintains a persistent state of the traveler’s itinerary, enabling proactive disruption management, real-time constraint reasoning, and automated recovery strategies.
