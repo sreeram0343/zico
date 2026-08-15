@@ -1,65 +1,80 @@
 """
-Unit tests for the ZICO TripState and TripSegment state models.
-
-Tests state creation, segment manipulation, default preferences, and schema validation.
+Unit tests for ZICO LangGraph state models (ZicoGraphState, TripSegment, Location, etc.).
 """
 
 from datetime import datetime, timedelta
 import pytest
-from app.graph.state import TripState, TripSegment, SegmentType, UserPreferences
+from app.graph.state import (
+    ZicoGraphState,
+    TripSegment,
+    Location,
+    TripConstraints,
+    PendingAction,
+    SegmentType,
+)
 
 
-def test_trip_state_creation():
-    """Verify that a TripState instance initializes with correct defaults."""
-    state = TripState(trip_id="123", user_id="user_1")
-    
-    # Assert primary identifiers
-    assert state.trip_id == "123"
-    assert state.user_id == "user_1"
-    
-    # Assert default empty state attributes
-    assert len(state.segments) == 0
-    assert state.preferences.currency == "USD"
-    assert len(state.preferences.preferred_airlines) == 0
-    assert len(state.constraints) == 0
+def test_zico_graph_state_creation():
+    """Verify initialization of ZicoGraphState with default values."""
+    state = ZicoGraphState(
+        messages=[],
+        trip_id="trip_123",
+        user_id="user_456"
+    )
+    assert state.trip_id == "trip_123"
+    assert state.user_id == "user_456"
+    assert len(state.messages) == 0
+    assert len(state.itinerary) == 0
+    assert state.constraints.min_connection_buffer_minutes == 90
     assert len(state.pending_actions) == 0
+    assert state.next_node is None
 
 
-def test_add_segment():
-    """Verify adding a TripSegment to TripState."""
-    now = datetime.now()
-    state = TripState(trip_id="123", user_id="user_1")
+def test_trip_segment_chronology_validation():
+    """Verify that end_time cannot precede start_time."""
+    start = datetime.now()
+    invalid_end = start - timedelta(hours=1)
     
-    # Construct a sample flight segment
-    seg = TripSegment(
-        id="s1",
-        type=SegmentType.FLIGHT,
-        start_time=now,
-        end_time=now + timedelta(hours=5),
-        location="NYC -> LHR",
-        details={"flight_no": "AA123", "airline": "American Airlines"}
+    loc = Location(name="JFK Airport", iata_code="JFK")
+    
+    with pytest.raises(ValueError, match="end_time must be strictly after start_time"):
+        TripSegment(
+            id="seg_1",
+            type="flight",
+            title="Flight to London",
+            start_time=start,
+            end_time=invalid_end,
+            location=loc,
+            cost=500.0
+        )
+
+
+def test_valid_trip_segment_addition():
+    """Verify creating a valid segment and adding it to the itinerary."""
+    start = datetime.now()
+    end = start + timedelta(hours=7)
+    loc = Location(name="London Heathrow", iata_code="LHR")
+    
+    segment = TripSegment(
+        id="seg_flight_01",
+        type="flight",
+        title="Flight BA178",
+        start_time=start,
+        end_time=end,
+        location=loc,
+        cost=750.00,
+        currency="USD",
+        metadata={"flight_number": "BA178"}
     )
     
-    # Append segment to state
-    state.segments.append(seg)
-    
-    # Assert segment properties
-    assert len(state.segments) == 1
-    assert state.segments[0].id == "s1"
-    assert state.segments[0].type == SegmentType.FLIGHT
-    assert state.segments[0].details["flight_no"] == "AA123"
-    assert state.segments[0].is_confirmed is False
-
-
-def test_user_preferences_customization():
-    """Verify setting custom user preferences within TripState."""
-    prefs = UserPreferences(
-        currency="EUR",
-        preferred_airlines=["BA", "LH"],
-        dietary_restrictions=["Vegetarian"]
+    state = ZicoGraphState(
+        messages=[],
+        trip_id="trip_123",
+        user_id="user_456",
+        itinerary=[segment]
     )
-    state = TripState(trip_id="456", user_id="user_2", preferences=prefs)
     
-    assert state.preferences.currency == "EUR"
-    assert "BA" in state.preferences.preferred_airlines
-    assert "Vegetarian" in state.preferences.dietary_restrictions
+    assert len(state.itinerary) == 1
+    assert state.itinerary[0].title == "Flight BA178"
+    assert state.itinerary[0].location.iata_code == "LHR"
+    assert state.itinerary[0].cost == 750.00
