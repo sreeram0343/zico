@@ -1,6 +1,7 @@
 from __future__ import annotations
-from typing import Annotated, Any, Dict, List, Literal, Optional, Sequence
 from datetime import datetime
+from enum import Enum
+from typing import Annotated, Any, Dict, List, Literal, Optional, Sequence
 from pydantic import BaseModel, Field, field_validator
 from langchain_core.messages import BaseMessage
 from langgraph.graph.message import add_messages
@@ -9,11 +10,50 @@ from langgraph.graph.message import add_messages
 # Domain Models (Strict Pydantic)
 # ---------------------------------------------------------------------------
 
-class SegmentType(str):
-    FLIGHT = "flight"
-    HOTEL = "hotel"
-    ACTIVITY = "activity"
-    TRANSFER = "transfer"
+
+class SegmentType(str, Enum):
+    FLIGHT = "FLIGHT"
+    HOTEL = "HOTEL"
+    ACTIVITY = "ACTIVITY"
+    TRANSFER = "TRANSFER"
+
+    @classmethod
+    def _missing_(cls, value: object) -> Optional[SegmentType]:
+        if isinstance(value, str):
+            for member in cls:
+                if member.value.lower() == value.lower():
+                    return member
+        return None
+
+
+class ActionType(str, Enum):
+    BOOKING = "BOOKING"
+    CANCELLATION = "CANCELLATION"
+    PAYMENT = "PAYMENT"
+    RESCHEDULE = "RESCHEDULE"
+
+    @classmethod
+    def _missing_(cls, value: object) -> Optional[ActionType]:
+        if isinstance(value, str):
+            for member in cls:
+                if member.value.lower() == value.lower():
+                    return member
+        return None
+
+
+class ActionStatus(str, Enum):
+    PENDING = "PENDING"
+    APPROVED = "APPROVED"
+    REJECTED = "REJECTED"
+
+    @classmethod
+    def _missing_(cls, value: object) -> Optional[ActionStatus]:
+        if isinstance(value, str):
+            for member in cls:
+                if member.value.lower() == value.lower():
+                    return member
+        return None
+
 
 class Location(BaseModel):
     name: str
@@ -21,9 +61,10 @@ class Location(BaseModel):
     lat: Optional[float] = None
     lng: Optional[float] = None
 
+
 class TripSegment(BaseModel):
     id: str
-    type: Literal["flight", "hotel", "activity", "transfer"]
+    type: SegmentType
     title: str
     start_time: datetime
     end_time: datetime
@@ -37,9 +78,10 @@ class TripSegment(BaseModel):
     @classmethod
     def validate_chronology(cls, v: datetime, values: Any) -> datetime:
         start = values.data.get("start_time")
-        if start and v < start:
+        if start and v <= start:
             raise ValueError("end_time must be strictly after start_time")
         return v
+
 
 class TripConstraints(BaseModel):
     max_budget: Optional[float] = None
@@ -47,21 +89,27 @@ class TripConstraints(BaseModel):
     required_arrival_by: Optional[datetime] = None
     strict_dietary: List[str] = Field(default_factory=list)
 
+
 class PendingAction(BaseModel):
     action_id: str
-    action_type: Literal["BOOKING", "CANCELLATION", "PAYMENT", "RESCHEDULE"]
+    action_type: ActionType
     description: str
-    payload: Dict[str, Any]
+    payload: Dict[str, Any] = Field(default_factory=dict)
     requires_explicit_approval: bool = True
-    status: Literal["PENDING", "APPROVED", "REJECTED"] = "PENDING"
+    status: ActionStatus = ActionStatus.PENDING
+
 
 # ---------------------------------------------------------------------------
 # LangGraph Runtime State
 # ---------------------------------------------------------------------------
 
+
 class ZicoGraphState(BaseModel):
     """The central state flowing across all nodes in the orchestrator."""
-    messages: Annotated[Sequence[BaseMessage], add_messages]
+
+    messages: Annotated[Sequence[BaseMessage], add_messages] = Field(
+        default_factory=list
+    )
     trip_id: str
     user_id: str
     itinerary: List[TripSegment] = Field(default_factory=list)
