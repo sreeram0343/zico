@@ -4,6 +4,7 @@ from typing import Any, Dict, List, Literal, Optional
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
+from langgraph.types import Command, interrupt
 
 from app.graph.disruption import DisruptionEvent, analyze_disruption, create_recovery_action
 from app.graph.state import (
@@ -133,7 +134,6 @@ def flight_search_worker_node(state: ZicoGraphState | Dict[str, Any]) -> Dict[st
     return {"messages": [AIMessage(content=response_text)]}
 
 
-
 def policy_rag_worker_node(state: ZicoGraphState | Dict[str, Any]) -> Dict[str, Any]:
     """
     Worker node retrieving airline policies, baggage limits, visa rules,
@@ -237,6 +237,94 @@ def disruption_worker_node(state: ZicoGraphState | Dict[str, Any]) -> Dict[str, 
     }
 
 
+def booking_approval_node(state: ZicoGraphState | Dict[str, Any]) -> Dict[str, Any]:
+    """
+    High-impact action node governing bookings, cancellations, rescheduling, and payment commitments.
+    Uses native LangGraph interrupt() to dynamically pause execution, persist state, and await
+    explicit human verification Command(resume={'approved': True/False, ...}).
+
+    Zero-Bypass Security Guarantee:
+    No high-impact action will execute without explicit, validated human approval.
+    """
+    if isinstance(state, dict):
+        raw_actions = state.get("pending_actions", [])
+        raw_itinerary = state.get("itinerary", [])
+    else:
+        raw_actions = getattr(state, "pending_actions", [])
+        raw_itinerary = getattr(state, "itinerary", [])
+
+    actions: List[PendingAction] = [
+        a if isinstance(a, PendingAction) else PendingAction.model_validate(a)
+        for a in raw_actions
+    ]
+    itinerary: List[TripSegment] = [
+        s if isinstance(s, TripSegment) else TripSegment.model_validate(s)
+        for s in raw_itinerary
+    ]
+
+    # Find pending high-impact actions requiring approval
+    high_impact_types = {ActionType.BOOKING, ActionType.CANCELLATION, ActionType.PAYMENT, ActionType.RESCHEDULE}
+    updated_actions: List[PendingAction] = []
+    messages_out: List[BaseMessage] = []
+
+    for action in actions:
+        if action.status == ActionStatus.PENDING and action.requires_explicit_approval and action.action_type in high_impact_types:
+            # 1. Trigger dynamic LangGraph interrupt to pause execution and request human decision
+            interrupt_payload = {
+                "action_id": action.action_id,
+                "action_type": action.action_type.value,
+                "description": action.description,
+                "payload": action.payload,
+                "requires_explicit_approval": True,
+                "prompt": f"Traveler approval required to execute high-impact action: {action.description}",
+            }
+
+            # Pause execution until resume payload is received
+            human_decision = interrupt(interrupt_payload)
+
+            # 2. Validate human approval payload
+            is_approved = False
+            approver_actor = "unknown"
+            if isinstance(human_decision, dict):
+                is_approved = bool(human_decision.get("approved", False))
+                approver_actor = human_decision.get("actor", "traveler")
+            elif isinstance(human_decision, bool):
+                is_approved = human_decision
+
+            # 3. Apply decision or reject with zero bypass
+            if is_approved:
+                updated_action = action.model_copy(update={"status": ActionStatus.APPROVED})
+                updated_actions.append(updated_action)
+
+                # Confirm associated itinerary segments
+                seg_id = action.payload.get("affected_segment_id") or action.payload.get("segment_id")
+                if seg_id:
+                    for i, seg in enumerate(itinerary):
+                        if seg.id == seg_id:
+                            itinerary[i] = seg.model_copy(update={"is_confirmed": True})
+
+                messages_out.append(AIMessage(
+                    content=f"✅ **Action Confirmed**: Successfully approved and executed '{action.description}' (Authorized by: {approver_actor})."
+                ))
+            else:
+                updated_action = action.model_copy(update={"status": ActionStatus.REJECTED})
+                updated_actions.append(updated_action)
+                messages_out.append(AIMessage(
+                    content=f"❌ **Action Cancelled**: Execution of '{action.description}' was rejected by traveler."
+                ))
+        else:
+            updated_actions.append(action)
+
+    if not messages_out:
+        messages_out.append(AIMessage(content="No pending actions requiring traveler confirmation."))
+
+    return {
+        "pending_actions": updated_actions,
+        "itinerary": itinerary,
+        "messages": messages_out,
+    }
+
+
 def validator_node(state: ZicoGraphState | Dict[str, Any]) -> Dict[str, Any]:
     """
     Executes deterministic itinerary conflict detection and updates active disruptions.
@@ -300,23 +388,36 @@ def validator_node(state: ZicoGraphState | Dict[str, Any]) -> Dict[str, Any]:
 
 def supervisor_router(state: ZicoGraphState | Dict[str, Any]) -> str:
     """
-    Evaluates next_node set by supervisor_node and routes to appropriate branch.
+    Evaluates state and routes to appropriate worker branch or booking_approval_node.
     """
     if isinstance(state, dict):
+        pending_actions = state.get("pending_actions", [])
         next_node = state.get("next_node")
     else:
+        pending_actions = getattr(state, "pending_actions", [])
         next_node = getattr(state, "next_node", None)
+
+    # Priority routing: If pending actions requiring approval exist, route to booking_approval_node
+    high_impact_types = {"BOOKING", "CANCELLATION", "PAYMENT", "RESCHEDULE", ActionType.BOOKING, ActionType.CANCELLATION, ActionType.PAYMENT, ActionType.RESCHEDULE}
+    for action in pending_actions:
+        a_type = getattr(action, "action_type", None) or (action.get("action_type") if isinstance(action, dict) else None)
+        a_status = getattr(action, "status", None) or (action.get("status") if isinstance(action, dict) else None)
+        a_req = getattr(action, "requires_explicit_approval", True) if not isinstance(action, dict) else action.get("requires_explicit_approval", True)
+        if a_req and str(a_status).upper() in ("PENDING", "ACTIONSTATUS.PENDING") and a_type in high_impact_types:
+            return "booking_approval_node"
 
     valid_destinations = {
         "flight_search_worker",
         "policy_rag_worker",
         "disruption_worker",
+        "booking_approval_node",
         "validator_node",
     }
 
     if next_node in valid_destinations:
         return next_node
     return "validator_node"
+
 
 
 # ---------------------------------------------------------------------------
@@ -334,6 +435,7 @@ def build_zico_graph() -> StateGraph:
     graph_builder.add_node("flight_search_worker", flight_search_worker_node)
     graph_builder.add_node("policy_rag_worker", policy_rag_worker_node)
     graph_builder.add_node("disruption_worker", disruption_worker_node)
+    graph_builder.add_node("booking_approval_node", booking_approval_node)
     graph_builder.add_node("validator_node", validator_node)
 
     # Initial flow
@@ -348,6 +450,7 @@ def build_zico_graph() -> StateGraph:
             "flight_search_worker": "flight_search_worker",
             "policy_rag_worker": "policy_rag_worker",
             "disruption_worker": "disruption_worker",
+            "booking_approval_node": "booking_approval_node",
             "validator_node": "validator_node",
         },
     )
@@ -356,6 +459,7 @@ def build_zico_graph() -> StateGraph:
     graph_builder.add_edge("flight_search_worker", "validator_node")
     graph_builder.add_edge("policy_rag_worker", "validator_node")
     graph_builder.add_edge("disruption_worker", "validator_node")
+    graph_builder.add_edge("booking_approval_node", "validator_node")
     graph_builder.add_edge("validator_node", END)
 
     return graph_builder

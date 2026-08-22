@@ -16,11 +16,13 @@ class RouteDecision(BaseModel):
         "flight_search_worker",
         "policy_rag_worker",
         "disruption_worker",
+        "booking_approval_node",
         "validator_node",
         "FINISH",
     ] = Field(
         description="The next specialized worker node or terminal action to route the conversation to."
     )
+
     confidence: float = Field(
         default=1.0,
         ge=0.0,
