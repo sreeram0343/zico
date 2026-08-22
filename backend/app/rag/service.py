@@ -12,6 +12,8 @@ from app.core.config import settings
 logger = logging.getLogger(__name__)
 
 EMBEDDING_DIMENSION = 1536
+_openai_quota_exhausted = False
+
 
 
 class PolicyDocument(BaseModel):
@@ -176,23 +178,29 @@ class PolicyRAGService:
 
     def embed_text(self, text: str) -> List[float]:
         """Generates embedding vector using OpenAI or deterministic fallback."""
+        global _openai_quota_exhausted
+
         if (
-            settings.OPENAI_API_KEY
+            not _openai_quota_exhausted
+            and settings.OPENAI_API_KEY
             and not settings.OPENAI_API_KEY.startswith("test")
             and settings.APP_ENV != "test"
             and os.getenv("PYTEST_CURRENT_TEST") is None
         ):
             try:
                 from openai import OpenAI
-                oai = OpenAI(api_key=settings.OPENAI_API_KEY, timeout=3.0, max_retries=1)
+                oai = OpenAI(api_key=settings.OPENAI_API_KEY, timeout=2.0, max_retries=0)
                 resp = oai.embeddings.create(
                     input=text,
                     model="text-embedding-3-small",
                 )
                 return resp.data[0].embedding
             except Exception as exc:
+                if "quota" in str(exc).lower() or "429" in str(exc):
+                    _openai_quota_exhausted = True
                 logger.warning(f"OpenAI embedding generation failed, falling back to deterministic: {exc}")
         return _compute_deterministic_embedding(text, dim=EMBEDDING_DIMENSION)
+
 
 
     def index_document(self, doc: PolicyDocument) -> None:

@@ -72,8 +72,10 @@ class AsyncPolicyRetriever:
         """
         Generates dense vector embeddings using OpenAI Async client or deterministic fallback.
         """
+        from app.rag.service import _openai_quota_exhausted
         if (
-            settings.OPENAI_API_KEY
+            not _openai_quota_exhausted
+            and settings.OPENAI_API_KEY
             and not settings.OPENAI_API_KEY.startswith("test")
             and settings.APP_ENV != "test"
             and os.getenv("PYTEST_CURRENT_TEST") is None
@@ -83,8 +85,8 @@ class AsyncPolicyRetriever:
 
                 client = AsyncOpenAI(
                     api_key=settings.OPENAI_API_KEY,
-                    timeout=3.0,
-                    max_retries=1,
+                    timeout=2.0,
+                    max_retries=0,
                 )
                 resp = await client.embeddings.create(
                     input=text,
@@ -95,6 +97,7 @@ class AsyncPolicyRetriever:
                 logger.warning(f"Async OpenAI embedding generation failed, falling back: {exc}")
 
         return _compute_deterministic_embedding(text, dim=EMBEDDING_DIMENSION)
+
 
     async def index_policy(self, doc: PolicyDocument) -> bool:
         """
