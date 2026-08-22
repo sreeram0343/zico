@@ -24,13 +24,16 @@ async def lifespan(app: FastAPI):
     """
     logger.info("Initializing ZICO Intelligent Travel Operations Backend...")
 
-    # 1. Initialize Database Tables
+    # 1. Initialize Database Tables and Checkpointer Schema
     try:
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
-        logger.info("PostgreSQL database tables initialized.")
+        from app.db.checkpointer import setup_checkpoint_tables
+        await setup_checkpoint_tables()
+        logger.info("PostgreSQL database tables and LangGraph checkpointer schema initialized.")
     except Exception as exc:
         logger.warning(f"Database table initialization notice: {exc}")
+
 
     # 2. Initialize Redis Connection Pool
     try:
