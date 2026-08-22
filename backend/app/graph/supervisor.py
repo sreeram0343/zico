@@ -66,8 +66,11 @@ def supervisor_node(state: Dict[str, Any] | Any) -> Dict[str, Any]:
         model="gpt-4o-mini",
         temperature=0,
         api_key=settings.OPENAI_API_KEY,
+        timeout=3.0,
+        max_retries=1,
     )
     structured_llm = llm.with_structured_output(RouteDecision)
+
 
     prompt = ChatPromptTemplate.from_messages([
         ("system", SUPERVISOR_SYSTEM_PROMPT),
@@ -78,9 +81,13 @@ def supervisor_node(state: Dict[str, Any] | Any) -> Dict[str, Any]:
 
     try:
         decision: RouteDecision = chain.invoke({"messages": messages})
-        next_step = decision.next_step
+        next_step = getattr(decision, "next_step", "validator_node")
     except Exception:
         # Fallback to validator_node if external API fails or in offline tests
         next_step = "validator_node"
 
+    if not isinstance(next_step, str):
+        next_step = "validator_node"
+
     return {"next_node": next_step}
+
