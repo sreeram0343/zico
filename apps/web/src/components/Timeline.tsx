@@ -28,15 +28,17 @@ export function Timeline({
   // Initialize WebSocket connection
   useEffect(() => {
     const wsUrl = `${wsBaseUrl.replace(/^http/, 'ws')}/ws/stream/${tripId}`;
+    console.log('[CLIENT] Connecting to WebSocket:', wsUrl);
     const ws = new WebSocket(wsUrl);
 
     ws.onopen = () => {
+      console.log('[CLIENT] WebSocket connected successfully to:', wsUrl);
       setIsConnected(true);
       setMessages((prev) => [
         ...prev,
         {
           role: 'system',
-          text: `⚡ Connected to ZICO Real-time Orchestration Engine (Trip: ${tripId})`,
+          text: `Connected to ZICO Real-time Orchestration Engine (Trip: ${tripId})`,
           time: new Date().toLocaleTimeString(),
         },
       ]);
@@ -45,17 +47,25 @@ export function Timeline({
     ws.onmessage = (event) => {
       try {
         const streamEvent: StreamEvent = JSON.parse(event.data);
+        console.log('[CLIENT] Message received:', streamEvent);
 
         // 1. Node updates
         if (streamEvent.type === 'node_update') {
           setActiveWorkerNode(streamEvent.node || null);
 
-          if (streamEvent.message) {
+          const msgText =
+            streamEvent.message ||
+            streamEvent.content ||
+            (streamEvent.output?.messages && streamEvent.output.messages[0]?.content) ||
+            '';
+
+          if (msgText) {
+            console.log('[CLIENT] Response rendered from node:', streamEvent.node);
             setMessages((prev) => [
               ...prev,
               {
                 role: 'assistant',
-                text: streamEvent.message!,
+                text: typeof msgText === 'string' ? msgText : JSON.stringify(msgText),
                 node: streamEvent.node,
                 time: new Date().toLocaleTimeString(),
               },
@@ -63,63 +73,77 @@ export function Timeline({
           }
 
           // If itinerary was updated in node output
-          if (streamEvent.output?.itinerary) {
+          if (streamEvent.output?.itinerary && Array.isArray(streamEvent.output.itinerary)) {
+            console.log('[CLIENT] Itinerary segments received:', streamEvent.output.itinerary.length);
             setItinerary(streamEvent.output.itinerary);
           }
         }
 
-        // 2. Dynamic Human-in-the-Loop Interrupt
+        // 2. Status update
+        else if (streamEvent.type === 'status') {
+          const statusText = streamEvent.message || streamEvent.content || 'Processing...';
+          console.log('[CLIENT] Status update:', statusText);
+          setActiveWorkerNode('supervisor');
+        }
+
+        // 3. Dynamic Human-in-the-Loop Interrupt
         else if (streamEvent.type === 'interrupt' && streamEvent.interrupt_value) {
+          console.log('[CLIENT] Interrupt event received:', streamEvent.interrupt_value);
           setActiveInterrupt(streamEvent.interrupt_value);
           setIsProcessing(false);
         }
 
-        // 3. Audio / Voice playback
+        // 4. Audio / Voice playback
         else if (streamEvent.type === 'voice_chunk' && streamEvent.audio_base64) {
           try {
             const audio = new Audio(`data:audio/wav;base64,${streamEvent.audio_base64}`);
             audio.play().catch(() => {});
           } catch (e) {
-            console.debug('Audio autoplay suppressed', e);
+            console.debug('Audio playback note:', e);
           }
         }
 
-        // 4. Turn complete
+        // 5. Turn complete
         else if (streamEvent.type === 'turn_complete') {
+          console.log('[CLIENT] Turn completed for trip:', tripId);
           setIsProcessing(false);
           setActiveWorkerNode(null);
         }
 
-        // 5. Stream error
+        // 6. Stream error
         else if (streamEvent.type === 'error') {
+          const errText = streamEvent.message || streamEvent.content || 'Stream error occurred';
+          console.error('[CLIENT] Stream error:', errText);
           setMessages((prev) => [
             ...prev,
             {
               role: 'system',
-              text: `⚠️ Error: ${streamEvent.message || 'Stream communication failure'}`,
+              text: `Error: ${errText}`,
               time: new Date().toLocaleTimeString(),
             },
           ]);
           setIsProcessing(false);
         }
       } catch (err) {
-        console.error('Failed to parse WebSocket message:', err);
+        console.error('[CLIENT] Failed to parse WebSocket message:', err);
       }
     };
 
-    ws.onclose = () => {
+    ws.onclose = (event) => {
+      console.log('[CLIENT] WebSocket closed:', event.code, event.reason);
       setIsConnected(false);
       setActiveWorkerNode(null);
     };
 
     ws.onerror = (err) => {
-      console.error('WebSocket error:', err);
+      console.error('[CLIENT] WebSocket error:', err);
       setIsConnected(false);
     };
 
     setSocket(ws);
 
     return () => {
+      console.log('[CLIENT] Closing WebSocket connection');
       ws.close();
     };
   }, [tripId, wsBaseUrl]);
@@ -135,6 +159,8 @@ export function Timeline({
     if (!promptInput.trim() || !socket || !isConnected) return;
 
     const userText = promptInput.trim();
+    console.log('[CLIENT] Sending message:', userText);
+
     setMessages((prev) => [
       ...prev,
       { role: 'user', text: userText, time: new Date().toLocaleTimeString() },
@@ -144,6 +170,8 @@ export function Timeline({
       JSON.stringify({
         type: 'prompt',
         message: userText,
+        content: userText,
+        trip_id: tripId,
         user_id: userId,
         enable_tts: true,
       })
@@ -159,20 +187,22 @@ export function Timeline({
 
     const payload = {
       type: 'decision',
-      action_id: activeInterrupt.action_id,
       approved,
+      action_id: activeInterrupt.action_id,
       actor: userId,
+      trip_id: tripId,
     };
 
+    console.log('[CLIENT] Submitting HITL decision:', payload);
     socket.send(JSON.stringify(payload));
 
     setMessages((prev) => [
       ...prev,
       {
-        role: 'system',
+        role: 'user',
         text: approved
-          ? `✅ Approved Action: ${activeInterrupt.description}`
-          : `❌ Rejected Action: ${activeInterrupt.description}`,
+          ? `Approved proposal: ${activeInterrupt.description}`
+          : `Rejected proposal: ${activeInterrupt.description}`,
         time: new Date().toLocaleTimeString(),
       },
     ]);
@@ -200,7 +230,7 @@ export function Timeline({
             <div className="flex flex-col items-center justify-center h-48 text-center text-slate-400">
               <Calendar className="w-10 h-10 mb-2 text-slate-600" />
               <p className="text-sm">No scheduled segments yet.</p>
-              <p className="text-xs text-slate-500">Ask ZICO to plan a route or search flights.</p>
+              <p className="text-xs text-slate-500">Ask ZICO to search flights or plan your itinerary.</p>
             </div>
           ) : (
             itinerary.map((seg, idx) => (
@@ -321,38 +351,27 @@ export function Timeline({
 
           {/* Dynamic Human-in-the-Loop Interrupt Approval Card */}
           {activeInterrupt && (
-            <div className="border-2 border-amber-500/80 bg-amber-950/30 backdrop-blur rounded-2xl p-5 shadow-xl animate-in fade-in slide-in-from-bottom-3 duration-300">
+            <div className="p-5 rounded-2xl bg-amber-950/40 border border-amber-800/80 shadow-lg animate-in fade-in slide-in-from-bottom-2 duration-300">
               <div className="flex items-start gap-3">
-                <div className="p-2 rounded-xl bg-amber-500/20 text-amber-400 border border-amber-500/30">
-                  <AlertTriangle className="w-5 h-5" />
-                </div>
+                <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
                 <div className="flex-1">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-semibold uppercase tracking-wider text-amber-400">
-                      Human Authorization Required
-                    </span>
-                    <span className="text-xs font-mono px-2 py-0.5 rounded bg-amber-950 border border-amber-700 text-amber-200">
-                      {activeInterrupt.action_type}
-                    </span>
-                  </div>
-                  <h3 className="text-base font-bold text-slate-100 mt-1">
+                  <h4 className="text-sm font-semibold text-amber-200">
+                    Human Authorization Required: {activeInterrupt.action_type}
+                  </h4>
+                  <p className="text-xs text-amber-300/80 mt-1">
                     {activeInterrupt.description}
-                  </h3>
-                  <p className="text-xs text-slate-300 mt-2">
-                    {activeInterrupt.prompt || 'Confirm whether you wish to proceed with this high-impact action.'}
                   </p>
-
-                  <div className="flex items-center gap-3 mt-4 pt-3 border-t border-amber-500/20">
+                  <div className="flex items-center gap-3 mt-4">
                     <button
                       onClick={() => handleDecision(true)}
-                      className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-semibold transition-all shadow-md active:scale-95"
+                      className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold shadow-md transition-all"
                     >
                       <CheckCircle2 className="w-4 h-4" />
                       <span>Approve & Execute</span>
                     </button>
                     <button
                       onClick={() => handleDecision(false)}
-                      className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-rose-900/40 hover:bg-rose-800/60 border border-rose-700/60 text-rose-200 text-sm font-semibold transition-all active:scale-95"
+                      className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold border border-slate-700 transition-all"
                     >
                       <XCircle className="w-4 h-4" />
                       <span>Reject Action</span>
@@ -363,30 +382,32 @@ export function Timeline({
             </div>
           )}
 
+          {isProcessing && !activeInterrupt && (
+            <div className="flex items-center gap-2 text-xs text-slate-400 animate-pulse pl-1">
+              <Radio className="w-3.5 h-3.5 animate-spin text-blue-400" />
+              <span>ZICO is reasoning across agents...</span>
+            </div>
+          )}
+
           <div ref={messagesEndRef} />
         </div>
 
-        {/* Input Bar */}
-        <form onSubmit={handleSendPrompt} className="pt-3 border-t border-slate-800 flex items-center gap-3">
+        {/* Input Controls */}
+        <form onSubmit={handleSendPrompt} className="pt-3 border-t border-slate-800 flex items-center gap-2">
           <input
             type="text"
             value={promptInput}
             onChange={(e) => setPromptInput(e.target.value)}
+            placeholder="Ask ZICO (e.g. 'Search flights from Mumbai to Pune')..."
+            className="flex-1 bg-slate-800/80 border border-slate-700/80 rounded-xl px-4 py-2.5 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
             disabled={!isConnected || isProcessing}
-            placeholder={
-              isConnected
-                ? 'Ask ZICO to search flights, analyze disruptions, or check policies...'
-                : 'Connecting to WebSocket stream...'
-            }
-            className="flex-1 bg-slate-950 border border-slate-800 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-3 text-sm text-slate-100 placeholder:text-slate-500 outline-none transition"
           />
           <button
             type="submit"
-            disabled={!isConnected || isProcessing || !promptInput.trim()}
-            className="px-5 py-3 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-semibold transition flex items-center gap-2 shadow-md active:scale-95"
+            disabled={!isConnected || !promptInput.trim() || isProcessing}
+            className="p-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:hover:bg-blue-600 text-white shadow-md transition-all"
           >
             <Send className="w-4 h-4" />
-            <span className="hidden sm:inline">Send</span>
           </button>
         </form>
       </div>

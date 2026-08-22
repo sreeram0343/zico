@@ -1,4 +1,5 @@
 from datetime import datetime
+import logging
 from typing import Any, Dict, List, Optional
 import uuid
 import dateutil.parser
@@ -7,6 +8,8 @@ import serpapi
 
 from app.core.config import settings
 from app.graph.state import Location, SegmentType, TripSegment
+
+logger = logging.getLogger(__name__)
 
 # Initialize SerpApi client
 client = serpapi.Client(api_key=settings.SERPAPI_API_KEY)
@@ -136,6 +139,9 @@ def search_flights(
     Raises:
         FlightSearchValidationError: If the API response contains malformed or unparseable data.
     """
+    if not settings.SERPAPI_API_KEY or settings.SERPAPI_API_KEY.startswith("test") or settings.SERPAPI_API_KEY == "":
+        raise FlightSearchValidationError("SerpApi API key not configured in environment.")
+
     params: Dict[str, Any] = {
         "engine": "google_flights",
         "departure_id": departure_id,
