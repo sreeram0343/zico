@@ -5,8 +5,10 @@ from langchain_core.messages import BaseMessage, HumanMessage
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from app.core.config import settings
 
+CONFIDENCE_THRESHOLD = 0.65
+DEFAULT_FALLBACK_ROUTE = "validator_node"
 
-# 1. Define allowed routing destinations
+
 class RouteDecision(BaseModel):
     """Pydantic structured output model for supervisor routing decisions."""
 
@@ -17,33 +19,40 @@ class RouteDecision(BaseModel):
         "validator_node",
         "FINISH",
     ] = Field(
-        description="The next worker node or terminal action to route the conversation to."
+        description="The next specialized worker node or terminal action to route the conversation to."
+    )
+    confidence: float = Field(
+        default=1.0,
+        ge=0.0,
+        le=1.0,
+        description="Confidence score between 0.0 and 1.0 for this routing classification.",
     )
     reasoning: str = Field(
-        description="Short rationale for choosing this worker or finishing"
+        description="Short rationale explaining the routing classification."
     )
 
 
-# 2. System prompt enforcing role separation
-SUPERVISOR_SYSTEM_PROMPT = """You are the orchestrator for the ZICO travel companion.
-Decide which worker needs to act next based on traveler state and latest message.
+SUPERVISOR_SYSTEM_PROMPT = """You are the Lead Routing Supervisor for the ZICO intelligent travel operations companion.
+Analyze the traveler's conversation history, active state, and latest inquiry to classify intent and select the single most appropriate worker.
 
 Available Workers:
-- flight_search_worker: For flight searches, availability, schedules, fares, and flight lookup queries.
-- policy_rag_worker: For baggage allowance, cancellation policies, airline rules, and travel policy documents.
-- disruption_worker: For handling flight delays, cancellations, rebooking assistance, weather issues, or urgent travel disruptions.
-- validator_node: For checking itinerary conflicts, budget caps, and timeline buffer constraints.
-- FINISH: Select FINISH when the conversation has completed, the user's intent is answered, or no further specialized worker action is required.
+1. flight_search_worker: For flight searches, schedules, airline availability, fares, and new flight reservations.
+2. policy_rag_worker: For baggage dimensions/weight rules, cancellation policies, EU261 passenger compensation, visas, and insurance regulations.
+3. disruption_worker: For flight delays, cancellations, missed connections, schedule collisions, and urgent rebooking assistance.
+4. validator_node: For checking itinerary conflict overlaps, layover buffers, and budget compliance.
+5. FINISH: When the user's intent is answered or no further worker action is required.
+
+Safety Rules:
+- If traveler intent is ambiguous, low-confidence, or unclear (confidence < 0.65), default to validator_node.
+- Never guess or route to a specialized worker without explicit intent.
 """
 
 
-# 3. Supervisor Node callable
 def supervisor_node(state: Dict[str, Any] | Any) -> Dict[str, Any]:
     """
-    Evaluates the conversation history and routes execution to the appropriate worker node or FINISH.
-    Uses ChatOpenAI with structured output (RouteDecision).
+    Evaluates conversation history and deterministically routes execution to the appropriate worker node.
+    Uses ChatOpenAI with structured output (RouteDecision) and explicit confidence-threshold fallback.
     """
-    # Extract messages defensively from state dictionary or state object
     if isinstance(state, dict):
         raw_messages = state.get("messages") or []
     else:
@@ -61,33 +70,37 @@ def supervisor_node(state: Dict[str, Any] | Any) -> Dict[str, Any]:
     if not messages:
         messages = [HumanMessage(content="Hello ZICO")]
 
-    # Initialize LLM and bind structured output
-    llm = ChatOpenAI(
-        model="gpt-4o-mini",
-        temperature=0,
-        api_key=settings.OPENAI_API_KEY,
-        timeout=3.0,
-        max_retries=1,
-    )
-    structured_llm = llm.with_structured_output(RouteDecision)
-
-
-    prompt = ChatPromptTemplate.from_messages([
-        ("system", SUPERVISOR_SYSTEM_PROMPT),
-        MessagesPlaceholder(variable_name="messages"),
-    ])
-
-    chain = prompt | structured_llm
-
     try:
+        llm = ChatOpenAI(
+            model="gpt-4o-mini",
+            temperature=0,
+            api_key=settings.OPENAI_API_KEY,
+            timeout=3.0,
+            max_retries=1,
+        )
+        structured_llm = llm.with_structured_output(RouteDecision)
+
+        prompt = ChatPromptTemplate.from_messages([
+            ("system", SUPERVISOR_SYSTEM_PROMPT),
+            MessagesPlaceholder(variable_name="messages"),
+        ])
+
+        chain = prompt | structured_llm
+
         decision: RouteDecision = chain.invoke({"messages": messages})
-        next_step = getattr(decision, "next_step", "validator_node")
+        confidence = getattr(decision, "confidence", 1.0)
+        next_step = getattr(decision, "next_step", DEFAULT_FALLBACK_ROUTE)
+
+        # Enforce confidence threshold fallback for ambiguous intent
+        if confidence < CONFIDENCE_THRESHOLD:
+            next_step = DEFAULT_FALLBACK_ROUTE
+
     except Exception:
-        # Fallback to validator_node if external API fails or in offline tests
-        next_step = "validator_node"
+        # Graceful fallback to default route on offline tests / API disconnect
+        next_step = DEFAULT_FALLBACK_ROUTE
 
     if not isinstance(next_step, str):
-        next_step = "validator_node"
+        next_step = DEFAULT_FALLBACK_ROUTE
 
     return {"next_node": next_step}
 
