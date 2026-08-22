@@ -93,7 +93,20 @@ def flight_search_worker_node(state: ZicoGraphState | Dict[str, Any]) -> Dict[st
         flight_results = [{"error": str(exc)}]
 
     # Format AI message response
-    if flight_results and "error" not in flight_results[0]:
+    if flight_results and isinstance(flight_results, list) and len(flight_results) > 0 and isinstance(flight_results[0], TripSegment):
+        options_summary = []
+        for i, f in enumerate(flight_results[:3], 1):
+            dep_time = f.start_time.strftime("%Y-%m-%d %H:%M")
+            arr_time = f.end_time.strftime("%Y-%m-%d %H:%M")
+            options_summary.append(
+                f"{i}. **{f.title}** | {dep_time} -> {arr_time} | Price: {f.cost:.2f} {f.currency}"
+            )
+        response_text = (
+            f"Here are the available flight options from **{origin}** to **{destination}** for {future_date}:\n\n"
+            + "\n".join(options_summary)
+            + "\n\nWould you like me to reserve one of these options into your itinerary?"
+        )
+    elif flight_results and isinstance(flight_results, list) and len(flight_results) > 0 and isinstance(flight_results[0], dict) and "error" not in flight_results[0]:
         options_summary = []
         for i, f in enumerate(flight_results[:3], 1):
             airline = f.get("airline", "Airline")
@@ -111,13 +124,14 @@ def flight_search_worker_node(state: ZicoGraphState | Dict[str, Any]) -> Dict[st
             + "\n\nWould you like me to reserve one of these options into your itinerary?"
         )
     else:
-        err = flight_results[0].get("error", "Unable to retrieve flights") if flight_results else "No flights found"
+        err = flight_results[0].get("error", "Unable to retrieve flights") if flight_results and isinstance(flight_results[0], dict) else "No flights found"
         response_text = (
             f"I checked flight availability from **{origin}** to **{destination}**, but encountered: {err}. "
             "Please verify airport codes or search dates."
         )
 
     return {"messages": [AIMessage(content=response_text)]}
+
 
 
 def policy_rag_worker_node(state: ZicoGraphState | Dict[str, Any]) -> Dict[str, Any]:

@@ -72,7 +72,7 @@ def test_flight_search_worker_node_execution(sample_state):
         msg = result["messages"][0]
         assert isinstance(msg, AIMessage)
         assert "British Airways" in msg.content
-        assert "540.0 USD" in msg.content
+        assert "540" in msg.content
 
 
 def test_policy_rag_worker_node_execution(sample_state):

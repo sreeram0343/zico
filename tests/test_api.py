@@ -234,7 +234,11 @@ async def test_flights_search_endpoint(client: AsyncClient):
         assert resp.status_code == 200
         data = resp.json()
         assert len(data) >= 1
-        assert data[0]["airline"] == "Delta Air Lines"
+        assert "Delta Air Lines" in data[0]["title"]
+        assert data[0]["type"] == "FLIGHT"
+        assert data[0]["cost"] == 680.0
+        assert data[0]["location"]["iata_code"] == "CDG"
+
 
 
 @pytest.mark.asyncio

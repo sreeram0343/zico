@@ -1,7 +1,8 @@
 from typing import List, Optional
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
-from app.tools.flight_search import FlightOption, search_flights
+from app.graph.state import TripSegment
+from app.tools.flight_search import FlightSearchValidationError, search_flights
 
 router = APIRouter()
 
@@ -14,16 +15,21 @@ class FlightSearchQuery(BaseModel):
     currency: str = Field(default="USD", description="Currency code (USD, EUR, GBP)")
 
 
-@router.post("/search", response_model=List[FlightOption])
-async def search_flights_endpoint(query: FlightSearchQuery) -> List[FlightOption]:
+@router.post("/search", response_model=List[TripSegment])
+async def search_flights_endpoint(query: FlightSearchQuery) -> List[TripSegment]:
     """
-    Direct flight search endpoint interfacing with SerpApi Google Flights.
+    Direct flight search endpoint returning strictly typed List[TripSegment].
     """
-    results = search_flights.invoke({
-        "departure_id": query.departure_id,
-        "arrival_id": query.arrival_id,
-        "outbound_date": query.outbound_date,
-        "return_date": query.return_date,
-        "currency": query.currency,
-    })
-    return results
+    try:
+        results = search_flights.invoke({
+            "departure_id": query.departure_id,
+            "arrival_id": query.arrival_id,
+            "outbound_date": query.outbound_date,
+            "return_date": query.return_date,
+            "currency": query.currency,
+        })
+        return results
+    except FlightSearchValidationError as exc:
+        raise HTTPException(status_code=422, detail=f"Flight validation error: {str(exc)}")
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Flight search failed: {str(exc)}")

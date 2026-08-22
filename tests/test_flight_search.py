@@ -1,13 +1,21 @@
-from unittest.mock import MagicMock, patch
-from app.tools.flight_search import search_flights, _parse_flight_entry
+from datetime import datetime
+from unittest.mock import patch
+import pytest
+
+from app.graph.state import SegmentType, TripSegment
+from app.tools.flight_search import (
+    FlightSearchValidationError,
+    parse_flight_to_trip_segment,
+    search_flights,
+)
 
 
-def test_parse_flight_entry():
-    """Verify parsing of raw SerpApi Google Flights response item."""
+def test_parse_flight_to_trip_segment_success():
+    """Verify parsing and schema validation of raw SerpApi Google Flights entry into TripSegment."""
     mock_flight_entry = {
         "flights": [
             {
-                "airline": "Delta",
+                "airline": "Delta Air Lines",
                 "flight_number": "DL 123",
                 "departure_airport": {"name": "John F. Kennedy Intl", "id": "JFK", "time": "2026-09-15 08:00"},
                 "arrival_airport": {"name": "Los Angeles Intl", "id": "LAX", "time": "2026-09-15 11:30"},
@@ -18,29 +26,61 @@ def test_parse_flight_entry():
         "price": 299.0,
     }
 
-    parsed = _parse_flight_entry(mock_flight_entry, currency="USD")
-    assert parsed["airline"] == "Delta"
-    assert parsed["flight_number"] == "DL 123"
-    assert parsed["departure_airport"] == "John F. Kennedy Intl"
-    assert parsed["departure_time"] == "2026-09-15 08:00"
-    assert parsed["arrival_airport"] == "Los Angeles Intl"
-    assert parsed["arrival_time"] == "2026-09-15 11:30"
-    assert parsed["duration"] == 330
-    assert parsed["price"] == 299.0
-    assert parsed["currency"] == "USD"
+    segment = parse_flight_to_trip_segment(mock_flight_entry, currency="USD")
+    assert isinstance(segment, TripSegment)
+    assert segment.type == SegmentType.FLIGHT
+    assert "Delta Air Lines" in segment.title
+    assert "DL 123" in segment.title
+    assert segment.location.name == "Los Angeles Intl"
+    assert segment.location.iata_code == "LAX"
+    assert segment.cost == 299.0
+    assert segment.currency == "USD"
+    assert segment.start_time < segment.end_time
+    assert segment.metadata["airline"] == "Delta Air Lines"
 
 
-def test_parse_flight_entry_empty():
-    """Verify fallback for empty flight legs."""
-    parsed = _parse_flight_entry({}, currency="EUR")
-    assert parsed["airline"] == "Unknown"
-    assert parsed["flight_number"] == "Unknown"
-    assert parsed["currency"] == "EUR"
+def test_parse_flight_empty_legs_raises_validation_error():
+    """Verify that missing or empty flights array raises FlightSearchValidationError."""
+    with pytest.raises(FlightSearchValidationError, match="flights.*missing or empty"):
+        parse_flight_to_trip_segment({}, currency="EUR")
+
+
+def test_parse_flight_invalid_chronology_raises_validation_error():
+    """Verify that invalid chronology (arrival before departure) raises FlightSearchValidationError."""
+    invalid_entry = {
+        "flights": [
+            {
+                "airline": "United",
+                "flight_number": "UA 100",
+                "departure_airport": {"name": "SFO", "id": "SFO", "time": "2026-09-15 15:00"},
+                "arrival_airport": {"name": "ORD", "id": "ORD", "time": "2026-09-15 10:00"},  # 5 hours earlier
+            }
+        ],
+        "price": 200.0,
+    }
+    with pytest.raises(FlightSearchValidationError, match="arrival time.*must be strictly after departure"):
+        parse_flight_to_trip_segment(invalid_entry)
+
+
+def test_parse_flight_missing_airport_data_raises_validation_error():
+    """Verify that missing airport object raises FlightSearchValidationError."""
+    malformed_entry = {
+        "flights": [
+            {
+                "airline": "United",
+                "flight_number": "UA 100",
+                # missing departure_airport
+                "arrival_airport": {"name": "ORD", "id": "ORD", "time": "2026-09-15 15:00"},
+            }
+        ]
+    }
+    with pytest.raises(FlightSearchValidationError, match="missing 'departure_airport'"):
+        parse_flight_to_trip_segment(malformed_entry)
 
 
 @patch("app.tools.flight_search.client.search")
 def test_search_flights_tool_success(mock_search):
-    """Verify search_flights tool execution with successful response."""
+    """Verify search_flights tool execution returns strictly List[TripSegment]."""
     mock_search.return_value = {
         "best_flights": [
             {
@@ -66,23 +106,22 @@ def test_search_flights_tool_success(mock_search):
         "currency": "USD",
     })
 
+    assert isinstance(results, list)
     assert len(results) == 1
-    assert results[0]["airline"] == "United Airlines"
-    assert results[0]["flight_number"] == "UA 456"
-    assert results[0]["price"] == 180.0
+    segment = results[0]
+    assert isinstance(segment, TripSegment)
+    assert segment.location.iata_code == "ORD"
+    assert segment.cost == 180.0
 
 
 @patch("app.tools.flight_search.client.search")
-def test_search_flights_tool_error_handling(mock_search):
-    """Verify graceful handling when SerpApi throws an error."""
-    mock_search.side_effect = Exception("API connection failure")
+def test_search_flights_tool_api_error(mock_search):
+    """Verify typed FlightSearchValidationError raised on API failure."""
+    mock_search.side_effect = Exception("SerpApi network outage")
 
-    results = search_flights.invoke({
-        "departure_id": "JFK",
-        "arrival_id": "LHR",
-        "outbound_date": "2026-09-15",
-    })
-
-    assert len(results) == 1
-    assert "error" in results[0]
-    assert "API connection failure" in results[0]["error"]
+    with pytest.raises(FlightSearchValidationError, match="SerpApi connection or query execution failed"):
+        search_flights.invoke({
+            "departure_id": "JFK",
+            "arrival_id": "LHR",
+            "outbound_date": "2026-09-15",
+        })

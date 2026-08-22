@@ -1,85 +1,114 @@
+from datetime import datetime
 from typing import Any, Dict, List, Optional
-from pydantic import BaseModel, Field
-import serpapi
+import uuid
+import dateutil.parser
 from langchain_core.tools import tool
+import serpapi
+
 from app.core.config import settings
+from app.graph.state import Location, SegmentType, TripSegment
 
 # Initialize SerpApi client
 client = serpapi.Client(api_key=settings.SERPAPI_API_KEY)
 
 
-class FlightOption(BaseModel):
-    """Structured Pydantic schema for a parsed flight option from SerpApi."""
-
-    airline: str = Field(default="Unknown", description="Operating airline name(s)")
-    flight_number: str = Field(default="Unknown", description="Flight identification number(s)")
-    departure_airport: str = Field(default="", description="Departure airport name or IATA code")
-    departure_time: str = Field(default="", description="Departure timestamp string")
-    arrival_airport: str = Field(default="", description="Arrival airport name or IATA code")
-    arrival_time: str = Field(default="", description="Arrival timestamp string")
-    duration: int = Field(default=0, description="Total flight duration in minutes")
-    price: Optional[float] = Field(default=None, description="Ticket price in specified currency")
-    currency: str = Field(default="USD", description="ISO currency code")
-    error: Optional[str] = Field(default=None, description="Error message if search failed")
-
-    def __getitem__(self, item: str) -> Any:
-        """Allow subscript access for backward compatibility."""
-        return getattr(self, item)
-
-    def __contains__(self, item: str) -> bool:
-        """Allow 'in' membership testing for backward compatibility."""
-        return hasattr(self, item) and getattr(self, item) is not None
-
-    def get(self, item: str, default: Any = None) -> Any:
-        """Allow dict-like get access."""
-        val = getattr(self, item, default)
-        return default if val is None else val
+class FlightSearchValidationError(ValueError):
+    """Raised when SerpApi flight search response contains malformed or unparseable data."""
+    pass
 
 
-def _parse_flight_entry(flight_entry: Dict[str, Any], currency: str = "USD") -> FlightOption:
-    """Parse a single flight option from SerpApi Google Flights response into a Pydantic FlightOption."""
-    legs = flight_entry.get("flights", [])
-    if not legs:
-        return FlightOption(
-            airline="Unknown",
-            flight_number="Unknown",
-            departure_airport="",
-            departure_time="",
-            arrival_airport="",
-            arrival_time="",
-            duration=flight_entry.get("total_duration", 0),
-            price=flight_entry.get("price"),
-            currency=currency,
-        )
+def _parse_timestamp(time_str: str) -> datetime:
+    """Parses date/time strings from SerpApi into a timezone-aware or UTC-standard datetime."""
+    if not time_str or not isinstance(time_str, str):
+        raise FlightSearchValidationError(f"Invalid or missing timestamp string: {time_str!r}")
+    try:
+        return dateutil.parser.parse(time_str)
+    except Exception as exc:
+        raise FlightSearchValidationError(f"Unable to parse timestamp '{time_str}': {exc}") from exc
 
-    airlines = [leg.get("airline") for leg in legs if leg.get("airline")]
-    airline_str = ", ".join(dict.fromkeys(airlines)) if airlines else "Unknown"
 
-    flight_numbers = [leg.get("flight_number") for leg in legs if leg.get("flight_number")]
-    flight_number_str = ", ".join(flight_numbers) if flight_numbers else "Unknown"
+def parse_flight_to_trip_segment(
+    flight_entry: Dict[str, Any],
+    currency: str = "USD",
+) -> TripSegment:
+    """
+    Parses and strictly validates a raw SerpApi Google Flights entry into a TripSegment domain model.
+    Raises FlightSearchValidationError on malformed or missing required fields.
+    """
+    if not isinstance(flight_entry, dict):
+        raise FlightSearchValidationError(f"Expected dict for flight entry, received {type(flight_entry).__name__}")
+
+    legs = flight_entry.get("flights")
+    if not legs or not isinstance(legs, list):
+        raise FlightSearchValidationError("Malformed SerpApi response: 'flights' list is missing or empty")
 
     first_leg = legs[0]
     last_leg = legs[-1]
 
-    dep_airport = first_leg.get("departure_airport", {})
-    arr_airport = last_leg.get("arrival_airport", {})
+    dep_airport = first_leg.get("departure_airport")
+    if not dep_airport or not isinstance(dep_airport, dict):
+        raise FlightSearchValidationError("Malformed flight leg: missing 'departure_airport' data")
 
-    dep_time = dep_airport.get("time", "")
-    arr_time = arr_airport.get("time", "")
+    arr_airport = last_leg.get("arrival_airport")
+    if not arr_airport or not isinstance(arr_airport, dict):
+        raise FlightSearchValidationError("Malformed flight leg: missing 'arrival_airport' data")
 
-    duration = flight_entry.get("total_duration") or sum(leg.get("duration", 0) for leg in legs)
-    price = flight_entry.get("price")
+    dep_time_str = dep_airport.get("time")
+    if not dep_time_str:
+        raise FlightSearchValidationError("Malformed departure_airport: missing 'time' field")
 
-    return FlightOption(
-        airline=airline_str,
-        flight_number=flight_number_str,
-        departure_airport=dep_airport.get("name") or dep_airport.get("id", ""),
-        departure_time=dep_time,
-        arrival_airport=arr_airport.get("name") or arr_airport.get("id", ""),
-        arrival_time=arr_time,
-        duration=duration,
-        price=price,
+    arr_time_str = arr_airport.get("time")
+    if not arr_time_str:
+        raise FlightSearchValidationError("Malformed arrival_airport: missing 'time' field")
+
+    start_time = _parse_timestamp(dep_time_str)
+    end_time = _parse_timestamp(arr_time_str)
+
+    if end_time <= start_time:
+        raise FlightSearchValidationError(
+            f"Invalid flight chronology: arrival time ({end_time}) must be strictly after departure ({start_time})"
+        )
+
+    airlines = [leg.get("airline") for leg in legs if leg.get("airline")]
+    airline_str = ", ".join(dict.fromkeys(airlines)) if airlines else "Airline"
+
+    flight_numbers = [leg.get("flight_number") for leg in legs if leg.get("flight_number")]
+    flight_num_str = ", ".join(flight_numbers) if flight_numbers else f"FL-{uuid.uuid4().hex[:4].upper()}"
+
+    arr_name = arr_airport.get("name") or arr_airport.get("id") or "Unknown Airport"
+    arr_iata = arr_airport.get("id")
+
+    location = Location(
+        name=arr_name,
+        iata_code=arr_iata,
+    )
+
+    raw_price = flight_entry.get("price")
+    try:
+        cost = float(raw_price) if raw_price is not None else 0.0
+    except (ValueError, TypeError) as exc:
+        raise FlightSearchValidationError(f"Invalid flight price value '{raw_price}': {exc}") from exc
+
+    seg_id = f"flight_{first_leg.get('flight_number', uuid.uuid4().hex[:6])}".replace(" ", "_")
+
+    return TripSegment(
+        id=seg_id,
+        type=SegmentType.FLIGHT,
+        title=f"{airline_str} ({flight_num_str})",
+        start_time=start_time,
+        end_time=end_time,
+        location=location,
+        cost=cost,
         currency=currency,
+        metadata={
+            "airline": airline_str,
+            "flight_number": flight_num_str,
+            "departure_airport": dep_airport.get("name") or dep_airport.get("id", ""),
+            "departure_iata": dep_airport.get("id", ""),
+            "total_duration_minutes": flight_entry.get("total_duration", 0),
+            "legs_count": len(legs),
+        },
+        is_confirmed=False,
     )
 
 
@@ -90,8 +119,8 @@ def search_flights(
     outbound_date: str,
     currency: str = "USD",
     return_date: Optional[str] = None,
-) -> List[FlightOption]:
-    """Search for flights using SerpApi Google Flights engine.
+) -> List[TripSegment]:
+    """Search for flights using SerpApi Google Flights engine and return strictly typed TripSegment list.
 
     Args:
         departure_id: Departure airport IATA code (e.g. 'JFK', 'SFO', 'LHR').
@@ -101,8 +130,11 @@ def search_flights(
         return_date: Optional return date in YYYY-MM-DD format for round trips.
 
     Returns:
-        List of structured FlightOption Pydantic models including airline, flight number,
-        departure time, arrival time, duration, and price.
+        List of strictly validated TripSegment domain models with departure, arrival,
+        airline metadata, and pricing.
+
+    Raises:
+        FlightSearchValidationError: If the API response contains malformed or unparseable data.
     """
     params: Dict[str, Any] = {
         "engine": "google_flights",
@@ -119,27 +151,21 @@ def search_flights(
     try:
         results = client.search(params)
         raw_results = results.as_dict() if hasattr(results, "as_dict") else dict(results)
-
-        best_flights = raw_results.get("best_flights", [])
-        flight_list = best_flights if best_flights else raw_results.get("other_flights", [])
-
-        parsed_flights: List[FlightOption] = [
-            _parse_flight_entry(f, currency=currency) for f in flight_list
-        ]
-        return parsed_flights
-
     except Exception as exc:
-        return [
-            FlightOption(
-                error=f"Failed to fetch flight data from SerpApi: {str(exc)}",
-                airline="",
-                flight_number="",
-                departure_airport="",
-                departure_time="",
-                arrival_airport="",
-                arrival_time="",
-                duration=0,
-                price=None,
-                currency=currency,
-            )
-        ]
+        raise FlightSearchValidationError(f"SerpApi connection or query execution failed: {exc}") from exc
+
+    if "error" in raw_results:
+        raise FlightSearchValidationError(f"SerpApi returned an error: {raw_results['error']}")
+
+    best_flights = raw_results.get("best_flights", [])
+    flight_list = best_flights if best_flights else raw_results.get("other_flights", [])
+
+    if not flight_list:
+        return []
+
+    parsed_segments: List[TripSegment] = []
+    for f in flight_list:
+        segment = parse_flight_to_trip_segment(f, currency=currency)
+        parsed_segments.append(segment)
+
+    return parsed_segments
