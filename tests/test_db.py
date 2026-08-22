@@ -57,5 +57,6 @@ async def test_redis_initialization():
 
         # Cleanup
         await close_redis()
-        mock_client.close.assert_awaited_once()
-        mock_pool.disconnect.assert_awaited_once()
+        assert mock_client.close.await_count == 1 or getattr(mock_client, "aclose").await_count == 1
+        assert mock_pool.disconnect.await_count == 1 or getattr(mock_pool, "adisconnect").await_count == 1
+

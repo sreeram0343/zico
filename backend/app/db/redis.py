@@ -30,8 +30,15 @@ async def close_redis() -> None:
     """Closes the Redis client and connection pool."""
     global redis_pool, redis_client
     if redis_client is not None:
-        await redis_client.close()
+        if hasattr(redis_client, "aclose"):
+            await redis_client.aclose()
+        else:
+            await redis_client.close()
         redis_client = None
     if redis_pool is not None:
-        await redis_pool.disconnect()
+        if hasattr(redis_pool, "adisconnect"):
+            await redis_pool.adisconnect()
+        else:
+            await redis_pool.disconnect()
         redis_pool = None
+
