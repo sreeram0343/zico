@@ -81,8 +81,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Mount API v1 Router
+# Mount API v1 Router and WebSocket Streaming Router
+from app.api.stream import router as stream_router
+
 app.include_router(api_router, prefix=settings.API_V1_STR)
+app.include_router(stream_router, prefix=settings.API_V1_STR, tags=["Streaming"])
+app.include_router(stream_router, tags=["Streaming"])
+
 
 
 @app.get("/")
