@@ -116,12 +116,39 @@ def test_search_flights_tool_success(mock_search):
 
 @patch("app.tools.flight_search.client.search")
 def test_search_flights_tool_api_error(mock_search):
-    """Verify typed FlightSearchValidationError raised on API failure."""
+    """Verify graceful handling and empty TripSegment list returned on API failure."""
     mock_search.side_effect = Exception("SerpApi network outage")
 
-    with pytest.raises(FlightSearchValidationError, match="SerpApi connection or query execution failed"):
-        search_flights.invoke({
-            "departure_id": "JFK",
-            "arrival_id": "LHR",
-            "outbound_date": "2026-09-15",
-        })
+    result = search_flights.invoke({
+        "departure_id": "JFK",
+        "arrival_id": "LHR",
+        "outbound_date": "2026-09-15",
+    })
+
+    assert isinstance(result, list)
+    assert len(result) == 0
+
+
+@patch("app.tools.flight_search.client.search")
+def test_search_flights_city_resolution_and_defaults(mock_search):
+    """Verify city name resolution to IATA codes, default tomorrow date, and typed list return."""
+    mock_search.return_value = {"best_flights": []}
+
+    # Test with city names and missing outbound_date
+    result = search_flights.invoke({
+        "departure_id": "mumbai",
+        "arrival_id": "pune",
+    })
+
+    assert isinstance(result, list)
+    assert len(result) == 0
+    # Check that mock_search was called with resolved IATA codes BOM and PNQ
+    mock_search.assert_called_once()
+    call_args = mock_search.call_args[0][0]
+    assert call_args["departure_id"] == "BOM"
+    assert call_args["arrival_id"] == "PNQ"
+    # Ensure outbound_date was automatically populated
+    assert call_args["outbound_date"] is not None
+    assert len(call_args["outbound_date"]) == 10
+
+

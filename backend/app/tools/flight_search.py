@@ -115,37 +115,119 @@ def parse_flight_to_trip_segment(
     )
 
 
+# Known City Name to Airport IATA Code Mapping
+CITY_TO_IATA: Dict[str, str] = {
+    "mumbai": "BOM",
+    "bombay": "BOM",
+    "pune": "PNQ",
+    "delhi": "DEL",
+    "new delhi": "DEL",
+    "bangalore": "BLR",
+    "bengaluru": "BLR",
+    "hyderabad": "HYD",
+    "chennai": "MAA",
+    "kolkata": "CCU",
+    "kochi": "COK",
+    "cochin": "COK",
+    "goa": "GOI",
+    "ahmedabad": "AMD",
+    "jaipur": "JAI",
+    "lucknow": "LKO",
+    "amritsar": "ATQ",
+    "srinagar": "SXR",
+    "varanasi": "VNS",
+    "indore": "IDR",
+    "patna": "PAT",
+    "chandigarh": "IXC",
+    "bhubaneswar": "BBI",
+    "guwahati": "GAU",
+    "nagpur": "NAG",
+    "coimbatore": "CJB",
+    "mangalore": "IXE",
+    "calicut": "CCJ",
+    "london": "LHR",
+    "paris": "CDG",
+    "tokyo": "HND",
+    "new york": "JFK",
+    "nyc": "JFK",
+    "san francisco": "SFO",
+    "sfo": "SFO",
+    "chicago": "ORD",
+    "ord": "ORD",
+    "los angeles": "LAX",
+    "lax": "LAX",
+    "dubai": "DXB",
+    "singapore": "SIN",
+    "frankfurt": "FRA",
+    "amsterdam": "AMS",
+}
+
+
+def resolve_airport_code(code_or_city: Optional[str], default: str = "BOM") -> str:
+    """
+    Resolves city name or lowercase IATA string to a validated 3-letter IATA code.
+    E.g. 'mumbai' -> 'BOM', 'pune' -> 'PNQ', 'SFO' -> 'SFO'.
+    """
+    if not code_or_city or not isinstance(code_or_city, str):
+        return default
+    cleaned = code_or_city.strip()
+    cleaned_lower = cleaned.lower()
+
+    if cleaned_lower in CITY_TO_IATA:
+        return CITY_TO_IATA[cleaned_lower]
+
+    for city, iata in CITY_TO_IATA.items():
+        if city in cleaned_lower:
+            return iata
+
+    if len(cleaned) == 3 and cleaned.isalpha():
+        return cleaned.upper()
+
+    return cleaned.upper()
+
+
 @tool
 def search_flights(
     departure_id: str,
     arrival_id: str,
-    outbound_date: str,
+    outbound_date: Optional[str] = None,
     currency: str = "USD",
     return_date: Optional[str] = None,
 ) -> List[TripSegment]:
     """Search for flights using SerpApi Google Flights engine and return strictly typed TripSegment list.
 
     Args:
-        departure_id: Departure airport IATA code (e.g. 'JFK', 'SFO', 'LHR').
-        arrival_id: Arrival airport IATA code (e.g. 'LAX', 'CDG', 'DXB').
-        outbound_date: Outbound travel date in YYYY-MM-DD format (e.g. '2026-09-15').
+        departure_id: Departure airport IATA code or city name (e.g. 'mumbai', 'JFK', 'SFO').
+        arrival_id: Arrival airport IATA code or city name (e.g. 'pune', 'LAX', 'CDG').
+        outbound_date: Outbound travel date in YYYY-MM-DD format. Defaults to tomorrow's date if not specified.
         currency: Preferred 3-letter currency code (e.g. 'USD', 'EUR', 'GBP'). Defaults to 'USD'.
         return_date: Optional return date in YYYY-MM-DD format for round trips.
 
     Returns:
         List of strictly validated TripSegment domain models with departure, arrival,
         airline metadata, and pricing.
-
-    Raises:
-        FlightSearchValidationError: If the API response contains malformed or unparseable data.
     """
+    from datetime import timedelta
+
+    # 1. Enforce robust defaults for city names -> airport IATA codes
+    dep_code = resolve_airport_code(departure_id, default="BOM")
+    arr_code = resolve_airport_code(arrival_id, default="PNQ")
+
+    # 2. Enforce robust default: if no departure date is specified, automatically inject tomorrow's date
+    if not outbound_date or not isinstance(outbound_date, str) or not outbound_date.strip():
+        tomorrow = datetime.now() + timedelta(days=1)
+        outbound_date = tomorrow.strftime("%Y-%m-%d")
+    else:
+        outbound_date = outbound_date.strip()
+
     if not settings.SERPAPI_API_KEY or settings.SERPAPI_API_KEY.startswith("test") or settings.SERPAPI_API_KEY == "":
-        raise FlightSearchValidationError("SerpApi API key not configured in environment.")
+        logger.info("SerpApi API key not configured in environment.")
+        return []
 
     params: Dict[str, Any] = {
         "engine": "google_flights",
-        "departure_id": departure_id,
-        "arrival_id": arrival_id,
+        "departure_id": dep_code,
+        "arrival_id": arr_code,
         "outbound_date": outbound_date,
         "currency": currency,
         "hl": "en",
@@ -154,14 +236,18 @@ def search_flights(
     if return_date:
         params["return_date"] = return_date
 
+    # 3. Isolated try/except block for SerpApi calls returning typed TripSegment list
     try:
         results = client.search(params)
         raw_results = results.as_dict() if hasattr(results, "as_dict") else dict(results)
     except Exception as exc:
-        raise FlightSearchValidationError(f"SerpApi connection or query execution failed: {exc}") from exc
+        logger.warning(f"SerpApi connection or query execution failed: {exc}")
+        return []
 
     if "error" in raw_results:
-        raise FlightSearchValidationError(f"SerpApi returned an error: {raw_results['error']}")
+        err_msg = raw_results.get("error", "Unknown SerpApi error")
+        logger.warning(f"SerpApi returned error: {err_msg}")
+        return []
 
     best_flights = raw_results.get("best_flights", [])
     flight_list = best_flights if best_flights else raw_results.get("other_flights", [])
@@ -171,7 +257,13 @@ def search_flights(
 
     parsed_segments: List[TripSegment] = []
     for f in flight_list:
-        segment = parse_flight_to_trip_segment(f, currency=currency)
-        parsed_segments.append(segment)
+        try:
+            segment = parse_flight_to_trip_segment(f, currency=currency)
+            parsed_segments.append(segment)
+        except Exception as parse_err:
+            logger.debug(f"Skipping malformed flight entry: {parse_err}")
+            continue
 
     return parsed_segments
+
+

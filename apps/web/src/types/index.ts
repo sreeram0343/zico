@@ -39,13 +39,28 @@ export interface InterruptEvent {
 }
 
 export interface StreamEvent {
-  type: 'node_update' | 'interrupt' | 'voice_chunk' | 'transcript' | 'turn_complete' | 'error';
+  type:
+    | 'node_update'
+    | 'interrupt'
+    | 'voice_chunk'
+    | 'transcript'
+    | 'turn_complete'
+    | 'error'
+    | 'status'
+    | 'tool_call'
+    | 'token'
+    | 'state_update';
   node?: string;
   output?: Record<string, any>;
   message?: string;
+  content?: string;
   interrupt_value?: InterruptEvent;
   prompt?: string;
   audio_base64?: string;
   text?: string;
   trip_id?: string;
+  tool?: string;
+  input?: any;
+  itinerary?: TripSegment[];
 }
+
