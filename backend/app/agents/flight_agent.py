@@ -17,13 +17,13 @@ Design Principles:
     - Intent Guard: Rejects non-flight requests (`intent != 'flight'`) without executing tools.
     - Robust Resolution: Handles flight numbers, airport codes, cities, and dates cleanly.
     - Ambiguity & Error Resilient: Distinctly tracks 'success', 'no_results', and 'error'.
-    - LangGraph Ready: Asynchronous and synchronous entry points for graph nodes.
+    - LangGraph Ready: Asynchronous entry point for workflow graphs.
 """
 
 from __future__ import annotations
 
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from app.core.logging import get_logger
 from app.core.state import TravelState
@@ -36,10 +36,10 @@ from app.tools.location import LocationResolver, resolve_location
 
 logger = get_logger(__name__)
 
-# Common English prepositions/words to exclude from airline designator matching
+# Common English prepositions/words to exclude from standalone airline designator matching
 STOPWORDS = {"ON", "IN", "TO", "AT", "BY", "NO", "IS", "IT", "DO", "GO", "ME", "MY", "HE", "WE", "US", "OR", "IF", "SO", "AS"}
 
-# Explicit flight prefix pattern (e.g. "flight EK522", "flt 522")
+# Explicit flight prefix pattern (e.g. "flight EK522", "flt 522", "flight no 123")
 EXPLICIT_FLIGHT_REGEX = re.compile(
     r"\b(?:flight|flt)\s+(?:number\s+|no\.?\s+|#\s*)?([A-Za-z]{2,3}\s*\d{1,4}|\d{1,4})\b",
     re.IGNORECASE,
@@ -82,18 +82,20 @@ class FlightAgent:
         self.aviation_client = aviation_client
         self.location_resolver = location_resolver
 
-    def _resolve_airport_code(self, location_query: Optional[str]) -> Optional[str]:
+    def _resolve_location_info(self, location_query: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
         """
-        Resolve a city or airport query into a standard 3-letter IATA code.
-        Returns None if not resolvable or ambiguous.
+        Resolve a city or airport query into (iata_code, status).
+
+        Returns:
+            Tuple of (iata_code or None, resolution_status or None).
         """
         if not location_query or not isinstance(location_query, str) or not location_query.strip():
-            return None
+            return None, None
 
         cleaned = location_query.strip()
-        # If already a 3-letter uppercase code, check directly
+        # Avoid duplicate resolution if already a standard 3-letter IATA code
         if len(cleaned) == 3 and cleaned.isalpha():
-            return cleaned.upper()
+            return cleaned.upper(), "resolved"
 
         if self.location_resolver:
             res = self.location_resolver.resolve(cleaned)
@@ -102,10 +104,10 @@ class FlightAgent:
 
         if res.status == "resolved" and res.iata_code:
             logger.info("Resolved location %r -> %s", cleaned, res.iata_code)
-            return res.iata_code
+            return res.iata_code, "resolved"
 
-        logger.warning("Could not resolve location %r to a single IATA code (status=%s)", cleaned, res.status)
-        return None
+        logger.warning("Location resolution for %r produced status=%s", cleaned, res.status)
+        return None, res.status
 
     def _extract_flight_params(self, state: TravelState) -> Dict[str, Any]:
         """
@@ -143,7 +145,6 @@ class FlightAgent:
                 if standalone_match:
                     code = standalone_match.group(1).upper()
                     num = standalone_match.group(2)
-                    # Filter out stopwords and 4-digit years (e.g. 2024-2029)
                     is_year = len(num) == 4 and num.startswith(("19", "20"))
                     if code not in STOPWORDS and not is_year:
                         params["flight_iata"] = f"{code}{num}"
@@ -161,18 +162,20 @@ class FlightAgent:
 
         # 4. Resolve origin / destination IATA codes
         if origin and not params.get("dep_iata"):
-            dep_iata = self._resolve_airport_code(origin)
+            dep_iata, origin_status = self._resolve_location_info(origin)
             if dep_iata:
                 params["dep_iata"] = dep_iata
             else:
                 params["raw_origin"] = origin
+                params["origin_status"] = origin_status
 
         if destination and not params.get("arr_iata"):
-            arr_iata = self._resolve_airport_code(destination)
+            arr_iata, dest_status = self._resolve_location_info(destination)
             if arr_iata:
                 params["arr_iata"] = arr_iata
             else:
                 params["raw_destination"] = destination
+                params["destination_status"] = dest_status
 
         if departure_date and not params.get("flight_date"):
             params["flight_date"] = departure_date
@@ -211,24 +214,47 @@ class FlightAgent:
         # 2. Extract and Normalize Flight Parameters
         flight_params = self._extract_flight_params(state)
 
+        # Check if an explicitly requested origin or destination failed resolution
+        raw_origin = flight_params.get("raw_origin")
+        raw_dest = flight_params.get("raw_destination")
+
+        if raw_origin or raw_dest:
+            err_details = []
+            if raw_origin:
+                st = flight_params.get("origin_status", "unresolved")
+                if st == "ambiguous":
+                    err_details.append(f"origin '{raw_origin}' is ambiguous and matches multiple airports")
+                elif st == "not_found":
+                    err_details.append(f"origin '{raw_origin}' could not be resolved (not_found)")
+                else:
+                    err_details.append(f"could not resolve origin '{raw_origin}'")
+
+            if raw_dest:
+                st = flight_params.get("destination_status", "unresolved")
+                if st == "ambiguous":
+                    err_details.append(f"destination '{raw_dest}' is ambiguous and matches multiple airports")
+                elif st == "not_found":
+                    err_details.append(f"destination '{raw_dest}' could not be resolved (not_found)")
+                else:
+                    err_details.append(f"could not resolve destination '{raw_dest}'")
+
+            msg = f"Flight route resolution failed: {', '.join(err_details)}."
+            logger.error("Flight Agent failed: %s", msg)
+            return {
+                "flight_query": flight_params,
+                "flight_results": [],
+                "flight_status": "error",
+                "active_agent": "flight_agent",
+                "completed_agents": completed_agents,
+                "errors": current_errors + [msg],
+            }
+
         # Check if we have minimum viable search parameters
         has_flight_id = bool(flight_params.get("flight_iata") or flight_params.get("flight_number"))
         has_route = bool(flight_params.get("dep_iata") and flight_params.get("arr_iata"))
 
         if not has_flight_id and not has_route:
-            # Check if an origin or destination failed resolution
-            err_details = []
-            if "raw_origin" in flight_params:
-                err_details.append(f"could not resolve origin '{flight_params['raw_origin']}'")
-            if "raw_destination" in flight_params:
-                err_details.append(f"could not resolve destination '{flight_params['raw_destination']}'")
-
-            msg = "Insufficient flight information to query AviationStack."
-            if err_details:
-                msg += f" Details: {', '.join(err_details)}."
-            else:
-                msg += " Please provide a flight number (e.g. 'EK522') or valid route (e.g. 'from TRV to DXB')."
-
+            msg = "Insufficient flight information to query AviationStack. Please provide a flight number (e.g. 'EK522') or valid route (e.g. 'from TRV to DXB')."
             logger.error("Flight Agent failed: %s", msg)
             return {
                 "flight_query": flight_params,
@@ -256,7 +282,7 @@ class FlightAgent:
                 flight_date=flight_params.get("flight_date"),
             )
         except AviationStackError as exc:
-            logger.error("AviationStack query error: %s", exc)
+            logger.error("AviationStack provider error: %s", exc)
             return {
                 "flight_query": flight_params,
                 "flight_results": [],
