@@ -15,7 +15,7 @@ class Settings(BaseSettings):
     Application settings and environment variable schema for ZICO.
 
     Attributes:
-        GEMINI_API_KEY: API key for Google Gemini model services.
+        OPENAI_API_KEY: API key for OpenAI model services.
         TAVILY_API_KEY: API key for Tavily search operations.
         AVIATIONSTACK_API_KEY: API key for Aviationstack flight status and schedules.
         APP_ENV: Current application environment (e.g. development, staging, production, test).
@@ -33,9 +33,9 @@ class Settings(BaseSettings):
     )
 
     # External Provider API Keys (never hardcoded; loaded via env or .env)
-    GEMINI_API_KEY: str = Field(
+    OPENAI_API_KEY: str = Field(
         default="",
-        description="API key for Google Gemini API services.",
+        description="API key for OpenAI API services.",
     )
     TAVILY_API_KEY: str = Field(
         default="",
