@@ -37,6 +37,10 @@ class Settings(BaseSettings):
         default="",
         description="API key for OpenAI API services.",
     )
+    OPENAI_MODEL: str = Field(
+        default="gpt-4o-mini",
+        description="OpenAI model identifier for travel operations.",
+    )
     TAVILY_API_KEY: str = Field(
         default="",
         description="API key for Tavily search API.",
