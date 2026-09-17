@@ -196,7 +196,7 @@ def input_node(state: ZicoGraphState | Dict[str, Any]) -> Dict[str, Any]:
 
 def flight_search_worker_node(state: ZicoGraphState | Dict[str, Any]) -> Dict[str, Any]:
     """
-    Worker specialized in querying SerpApi Google Flights or generating validated flight segments,
+    Worker specialized in querying AviationStack flight search or generating validated flight segments,
     formatting results, and injecting structured flight options into the conversation and itinerary.
     """
     if isinstance(state, dict):
