@@ -27,29 +27,54 @@ from __future__ import annotations
 
 import re
 import uuid
-from typing import Any, Dict, List, Union
+from typing import Any, Dict, List, Optional, Union
 
-from fastapi import APIRouter, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    HTTPException,
+    Request,
+    Response,
+    status,
+)
 from fastapi.responses import JSONResponse
 
 from app.api.schemas import (
     APIError,
     APIErrorCode,
+    MAX_MESSAGE_LENGTH,
+    MAX_SESSION_ID_LENGTH,
     ResponseStatus,
     Source,
     TravelRequest,
     TravelResponse,
 )
 from app.core.logging import get_logger
-from app.core.state import TravelState, create_initial_state
-from app.graph.workflow import run_workflow
+from app.core.state import (
+    FlightResult,
+    ResearchResult,
+    TravelState,
+    create_initial_state,
+)
+from app.graph.workflow import run_workflow, zico_graph
 
 logger = get_logger(__name__)
 
 # Public API Router for ZICO conversational operations
 router = APIRouter(prefix="/api/v1", tags=["Travel Operations"])
 
-__all__ = ["router", "chat_endpoint"]
+__all__ = [
+    "router",
+    "chat_endpoint",
+    "TravelRequest",
+    "TravelResponse",
+    "Source",
+    "APIError",
+    "APIErrorCode",
+    "ResponseStatus",
+    "MAX_MESSAGE_LENGTH",
+    "MAX_SESSION_ID_LENGTH",
+]
 
 
 def _determine_response_status(state: Dict[str, Any]) -> ResponseStatus:
