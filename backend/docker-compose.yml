@@ -1,0 +1,21 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: zico-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: zico
+      POSTGRES_USER: zico
+      POSTGRES_PASSWORD: zico_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - zico_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U zico -d zico"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  zico_postgres_data:

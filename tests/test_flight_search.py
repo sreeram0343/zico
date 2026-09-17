@@ -11,7 +11,7 @@ from app.tools.flight_search import (
 
 
 def test_parse_flight_to_trip_segment_success():
-    """Verify parsing and schema validation of raw SerpApi Google Flights entry into TripSegment."""
+    """Verify parsing and schema validation of flight entry into TripSegment."""
     mock_flight_entry = {
         "flights": [
             {
@@ -37,6 +37,40 @@ def test_parse_flight_to_trip_segment_success():
     assert segment.currency == "USD"
     assert segment.start_time < segment.end_time
     assert segment.metadata["airline"] == "Delta Air Lines"
+
+
+def test_parse_aviationstack_native_flight_entry():
+    """Verify parsing of native AviationStack response item into TripSegment."""
+    aviationstack_entry = {
+        "departure": {
+            "airport": "John F. Kennedy Intl",
+            "iata": "JFK",
+            "scheduled": "2026-09-15T08:00:00+00:00",
+        },
+        "arrival": {
+            "airport": "Los Angeles Intl",
+            "iata": "LAX",
+            "scheduled": "2026-09-15T11:30:00+00:00",
+        },
+        "airline": {
+            "name": "Delta Air Lines",
+            "iata": "DL",
+        },
+        "flight": {
+            "iata": "DL123",
+            "number": "123",
+        },
+        "price": 299.0,
+    }
+
+    segment = parse_flight_to_trip_segment(aviationstack_entry, currency="USD")
+    assert isinstance(segment, TripSegment)
+    assert segment.type == SegmentType.FLIGHT
+    assert "Delta Air Lines" in segment.title
+    assert "DL123" in segment.title
+    assert segment.location.name == "Los Angeles Intl"
+    assert segment.location.iata_code == "LAX"
+    assert segment.cost == 299.0
 
 
 def test_parse_flight_empty_legs_raises_validation_error():
@@ -117,7 +151,7 @@ def test_search_flights_tool_success(mock_search):
 @patch("app.tools.flight_search.client.search")
 def test_search_flights_tool_api_error(mock_search):
     """Verify graceful handling and empty TripSegment list returned on API failure."""
-    mock_search.side_effect = Exception("SerpApi network outage")
+    mock_search.side_effect = Exception("AviationStack network outage")
 
     result = search_flights.invoke({
         "departure_id": "JFK",
@@ -127,6 +161,51 @@ def test_search_flights_tool_api_error(mock_search):
 
     assert isinstance(result, list)
     assert len(result) == 0
+
+
+@patch("app.tools.flight_search.client.search")
+def test_search_flights_tool_aviationstack_format_success(mock_search):
+    """Verify search_flights tool parses native AviationStack response properly."""
+    mock_search.return_value = {
+        "data": [
+            {
+                "departure": {
+                    "airport": "San Francisco International",
+                    "iata": "SFO",
+                    "scheduled": "2026-09-15T09:00:00+00:00",
+                },
+                "arrival": {
+                    "airport": "Chicago O'Hare International",
+                    "iata": "ORD",
+                    "scheduled": "2026-09-15T15:00:00+00:00",
+                },
+                "airline": {
+                    "name": "United Airlines",
+                    "iata": "UA",
+                },
+                "flight": {
+                    "iata": "UA456",
+                    "number": "456",
+                },
+                "price": 180.0,
+            }
+        ]
+    }
+
+    results = search_flights.invoke({
+        "departure_id": "SFO",
+        "arrival_id": "ORD",
+        "outbound_date": "2026-09-15",
+        "currency": "USD",
+    })
+
+    assert isinstance(results, list)
+    assert len(results) == 1
+    segment = results[0]
+    assert isinstance(segment, TripSegment)
+    assert segment.location.iata_code == "ORD"
+    assert "United Airlines" in segment.title
+    assert segment.cost == 180.0
 
 
 @patch("app.tools.flight_search.client.search")
