@@ -1,102 +1,52 @@
-from contextlib import asynccontextmanager
-import logging
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
-from app.api.v1.api import api_router
-from app.core.config import settings
-from app.db.models import Base
-from app.db.redis import close_redis, init_redis
-from app.db.session import engine
-from app.rag.service import get_rag_service
+"""
+ZICO - AI-Powered Travel Operations Assistant.
 
-logging.basicConfig(
-    level=getattr(logging, settings.LOG_LEVEL.upper(), logging.INFO),
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-)
-logger = logging.getLogger("zico.main")
+FastAPI Application Entry Point.
+Provides the ASGI application instance, exposes the liveness health endpoint,
+and mounts the travel operations API router.
+"""
 
+from __future__ import annotations
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    """
-    Application lifespan manager handling database initialization,
-    Redis pool connection, and Policy RAG vector indexing.
-    """
-    logger.info("Initializing ZICO Intelligent Travel Operations Backend...")
+from typing import Dict
 
-    # 1. Initialize Database Tables and Checkpointer Schema
-    try:
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
-        from app.db.checkpointer import setup_checkpoint_tables
-        await setup_checkpoint_tables()
-        logger.info("PostgreSQL database tables and LangGraph checkpointer schema initialized.")
-    except Exception as exc:
-        logger.warning(f"Database table initialization notice: {exc}")
+from fastapi import FastAPI, status
 
+from app.api.routes import router as api_router
+from app.core.logging import configure_logging, get_logger
 
-    # 2. Initialize Redis Connection Pool
-    try:
-        await init_redis()
-        logger.info("Redis cache and session pool initialized.")
-    except Exception as exc:
-        logger.warning(f"Redis initialization notice: {exc}")
+# Ensure centralized logging is configured for ASGI servers (e.g., uvicorn app.main:app)
+configure_logging()
+logger = get_logger(__name__)
 
-    # 3. Seed Policy RAG Vector Store
-    try:
-        rag = get_rag_service()
-        count = rag.seed_default_policies()
-        logger.info(f"Qdrant policy vector store initialized with {count} baseline travel policies.")
-    except Exception as exc:
-        logger.warning(f"Policy RAG seed notice: {exc}")
-
-    yield
-
-    # Cleanup on shutdown
-    logger.info("Shutting down ZICO backend services...")
-    try:
-        await close_redis()
-    except Exception as exc:
-        logger.error(f"Error during Redis shutdown: {exc}")
-    try:
-        await engine.dispose()
-    except Exception as exc:
-        logger.error(f"Error during database engine shutdown: {exc}")
-
-
+# Primary FastAPI application instance
 app = FastAPI(
-    title=settings.PROJECT_NAME,
-    openapi_url=f"{settings.API_V1_STR}/openapi.json",
-    docs_url=f"{settings.API_V1_STR}/docs",
-    redoc_url=f"{settings.API_V1_STR}/redoc",
-    lifespan=lifespan,
+    title="ZICO",
+    description="AI-powered Travel Operations Assistant",
+    version="0.1.0",
 )
 
-# Configure CORS
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=settings.CORS_ORIGINS,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+
+@app.get(
+    "/health",
+    status_code=status.HTTP_200_OK,
+    summary="Application Liveness Health Check",
+    tags=["Health"],
 )
+async def health_check() -> Dict[str, str]:
+    """
+    Liveness health check endpoint.
 
-# Mount API v1 Router and WebSocket Streaming Router
-from app.api.stream import router as stream_router
-
-app.include_router(api_router, prefix=settings.API_V1_STR)
-app.include_router(stream_router, prefix=settings.API_V1_STR, tags=["Streaming"])
-app.include_router(stream_router, tags=["Streaming"])
+    Returns a simple status indicating that the FastAPI application process is alive.
+    Performs zero external API, LLM, or database calls.
+    """
+    return {"status": "ok"}
 
 
+# Mount the travel operations router (already defines prefix="/api/v1")
+app.include_router(api_router)
 
-@app.get("/")
-async def root():
-    """Root entrypoint returning system metadata."""
-    return {
-        "system": settings.PROJECT_NAME,
-        "version": "1.0.0",
-        "phase": "Phase 1 - Core Multi-Agent Travel Operations",
-        "docs": f"{settings.API_V1_STR}/docs",
-        "status": "operational",
-    }
+__all__ = [
+    "app",
+    "health_check",
+]
