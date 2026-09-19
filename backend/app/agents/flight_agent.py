@@ -52,7 +52,7 @@ STANDALONE_FLIGHT_REGEX = re.compile(
 
 # Regex for extracting "from <origin> to <destination>"
 ROUTE_REGEX = re.compile(
-    r"\bfrom\s+([A-Za-z\s]+?)\s+to\s+([A-Za-z\s]+?)(?:\s+on|\s+dated|\s+for|\s*$)",
+    r"\bfrom\s+([A-Za-z\s]+?)\s+to\s+([A-Za-z\s]+?)(?:\s+on|\s+dated|\s+for|[\s\.]*$)",
     re.IGNORECASE,
 )
 
@@ -120,7 +120,7 @@ class FlightAgent:
         if isinstance(existing_query, dict):
             params.update(existing_query)
 
-        user_query = str(state.get("user_query") or "")
+        user_query = str(state.get("user_query") or "").strip().rstrip(".?! ")
         origin = state.get("origin")
         destination = state.get("destination")
         departure_date = state.get("departure_date")
