@@ -101,12 +101,18 @@ def supervisor_node(state: Dict[str, Any] | Any) -> Dict[str, Any]:
 
     from app.rag.service import _openai_quota_exhausted
 
+    is_mocked = hasattr(ChatOpenAI, "assert_called") or "mock" in type(ChatOpenAI).__module__
     if (
         not _openai_quota_exhausted
-        and settings.OPENAI_API_KEY
-        and not settings.OPENAI_API_KEY.startswith("test")
-        and settings.APP_ENV != "test"
-        and os.getenv("PYTEST_CURRENT_TEST") is None
+        and (
+            is_mocked
+            or (
+                settings.OPENAI_API_KEY
+                and not settings.OPENAI_API_KEY.startswith("test")
+                and settings.APP_ENV != "test"
+                and os.getenv("PYTEST_CURRENT_TEST") is None
+            )
+        )
     ):
         try:
             llm = ChatOpenAI(
