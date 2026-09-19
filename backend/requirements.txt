@@ -31,7 +31,7 @@ certifi>=2024.2.2
 serpapi>=0.1.4
 python-dotenv>=1.0.1
 python-multipart>=0.0.9
-airportsdata>=20240101
+airportsdata>=20260905
 pycountry>=23.12.11
 
 # Testing & Linting
