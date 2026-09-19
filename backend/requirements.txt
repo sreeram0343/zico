@@ -25,7 +25,7 @@ edge-tts>=6.1.9
 elevenlabs>=0.2.27
 
 # HTTP Client & Utilities
-httpx>=0.27.0
+httpx>=0.28.1
 requests>=2.31.0
 certifi>=2024.2.2
 serpapi>=0.1.4
