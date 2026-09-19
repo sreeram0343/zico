@@ -21,7 +21,7 @@ asyncpg>=0.29.0
 redis>=5.0.3
 
 # Voice & Audio Processing
-edge-tts>=6.1.9
+edge-tts>=7.2.8
 elevenlabs>=0.2.27
 
 # HTTP Client & Utilities
