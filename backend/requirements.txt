@@ -1,5 +1,5 @@
 # Web Framework & Server
-fastapi>=0.110.0
+fastapi>=0.141.1
 uvicorn[standard]>=0.28.0
 pydantic>=2.6.0
 pydantic-settings>=2.2.0
