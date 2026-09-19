@@ -1,5 +1,7 @@
 from typing import Optional
+
 import redis.asyncio as aioredis
+
 from app.core.config import settings
 
 redis_pool: Optional[aioredis.ConnectionPool] = None
@@ -41,4 +43,3 @@ async def close_redis() -> None:
         else:
             await redis_pool.disconnect()
         redis_pool = None
-

@@ -35,6 +35,12 @@ jobs:
       - name: Install dependencies
         run: pip install -r backend/requirements.txt
 
+      - name: Ruff lint check
+        run: ruff check backend/app tests
+
+      - name: Ruff format check
+        run: ruff format --check backend/app tests
+
       - name: Compile check
         run: python -m compileall backend/app tests
 

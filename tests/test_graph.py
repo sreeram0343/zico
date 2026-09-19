@@ -3,8 +3,10 @@ Unit tests for LangGraph state machine construction and execution.
 """
 
 from datetime import datetime, timedelta
+
 from langchain_core.messages import HumanMessage
 from langgraph.checkpoint.memory import MemorySaver
+
 from app.graph.engine import create_zico_graph
 from app.graph.state import Location, SegmentType, TripConstraints, TripSegment
 

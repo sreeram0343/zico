@@ -1,10 +1,12 @@
 import logging
 import os
-from typing import Any, Dict, List, Literal, Optional, Sequence
-from pydantic import BaseModel, Field
-from langchain_openai import ChatOpenAI
+from typing import Any, Dict, List, Literal
+
 from langchain_core.messages import BaseMessage, HumanMessage
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain_openai import ChatOpenAI
+from pydantic import BaseModel, Field
+
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -33,9 +35,7 @@ class RouteDecision(BaseModel):
         le=1.0,
         description="Confidence score between 0.0 and 1.0 for this routing classification.",
     )
-    reasoning: str = Field(
-        description="Short rationale explaining the routing classification."
-    )
+    reasoning: str = Field(description="Short rationale explaining the routing classification.")
 
 
 SUPERVISOR_SYSTEM_PROMPT = """You are the Lead Routing Supervisor for the ZICO intelligent travel operations companion.
@@ -59,13 +59,46 @@ def _classify_intent_heuristically(latest_text: str) -> str:
     """Deterministic fallback intent classifier when LLM is offline, rate-limited, or quota exceeded."""
     lower = latest_text.lower()
 
-    if any(k in lower for k in ["flight", "flights", "fly", "airline", "ticket", "airport", "plane", "from ", "trip to"]):
+    if any(
+        k in lower
+        for k in [
+            "flight",
+            "flights",
+            "fly",
+            "airline",
+            "ticket",
+            "airport",
+            "plane",
+            "from ",
+            "trip to",
+        ]
+    ):
         return "flight_search_worker"
-    if any(k in lower for k in ["delay", "cancel", "reschedule", "disrupt", "missed", "stranded", "late"]):
+    if any(
+        k in lower
+        for k in ["delay", "cancel", "reschedule", "disrupt", "missed", "stranded", "late"]
+    ):
         return "disruption_worker"
-    if any(k in lower for k in ["policy", "baggage", "bag", "luggage", "visa", "passport", "refund", "insurance", "eu261", "compensation", "rule"]):
+    if any(
+        k in lower
+        for k in [
+            "policy",
+            "baggage",
+            "bag",
+            "luggage",
+            "visa",
+            "passport",
+            "refund",
+            "insurance",
+            "eu261",
+            "compensation",
+            "rule",
+        ]
+    ):
         return "policy_rag_worker"
-    if any(k in lower for k in ["approve", "confirm", "proceed", "yes", "accept", "reject", "deny"]):
+    if any(
+        k in lower for k in ["approve", "confirm", "proceed", "yes", "accept", "reject", "deny"]
+    ):
         return "booking_approval_node"
 
     return DEFAULT_FALLBACK_ROUTE
@@ -102,16 +135,13 @@ def supervisor_node(state: Dict[str, Any] | Any) -> Dict[str, Any]:
     from app.rag.service import _openai_quota_exhausted
 
     is_mocked = hasattr(ChatOpenAI, "assert_called") or "mock" in type(ChatOpenAI).__module__
-    if (
-        not _openai_quota_exhausted
-        and (
-            is_mocked
-            or (
-                settings.OPENAI_API_KEY
-                and not settings.OPENAI_API_KEY.startswith("test")
-                and settings.APP_ENV != "test"
-                and os.getenv("PYTEST_CURRENT_TEST") is None
-            )
+    if not _openai_quota_exhausted and (
+        is_mocked
+        or (
+            settings.OPENAI_API_KEY
+            and not settings.OPENAI_API_KEY.startswith("test")
+            and settings.APP_ENV != "test"
+            and os.getenv("PYTEST_CURRENT_TEST") is None
         )
     ):
         try:
@@ -124,10 +154,12 @@ def supervisor_node(state: Dict[str, Any] | Any) -> Dict[str, Any]:
             )
             structured_llm = llm.with_structured_output(RouteDecision)
 
-            prompt = ChatPromptTemplate.from_messages([
-                ("system", SUPERVISOR_SYSTEM_PROMPT),
-                MessagesPlaceholder(variable_name="messages"),
-            ])
+            prompt = ChatPromptTemplate.from_messages(
+                [
+                    ("system", SUPERVISOR_SYSTEM_PROMPT),
+                    MessagesPlaceholder(variable_name="messages"),
+                ]
+            )
 
             chain = prompt | structured_llm
 
@@ -141,8 +173,11 @@ def supervisor_node(state: Dict[str, Any] | Any) -> Dict[str, Any]:
         except Exception as exc:
             if "quota" in str(exc).lower() or "429" in str(exc):
                 import app.rag.service
+
                 app.rag.service._openai_quota_exhausted = True
-            logger.warning(f"LLM supervisor invocation notice: {exc}. Using deterministic intent routing.")
+            logger.warning(
+                f"LLM supervisor invocation notice: {exc}. Using deterministic intent routing."
+            )
             next_step = _classify_intent_heuristically(latest_user_text)
     else:
         next_step = _classify_intent_heuristically(latest_user_text)

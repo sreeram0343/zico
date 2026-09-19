@@ -1,5 +1,5 @@
 import json
-import pytest
+
 from starlette.testclient import TestClient
 
 from app.main import app
@@ -66,4 +66,3 @@ def test_websocket_stream_normalized_event_structure():
         status_frame = next(f for f in received if f.get("type") == "status")
         assert "node" in status_frame
         assert "content" in status_frame
-

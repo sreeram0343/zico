@@ -79,7 +79,9 @@ def get_chat_model(
         resolved_temp = getattr(settings, "OPENAI_TEMPERATURE", DEFAULT_TEMPERATURE)
 
     # Safe operational logging (never log credentials or prompts)
-    logger.info("Initializing OpenAI chat model (model=%s, temperature=%s)", resolved_model, resolved_temp)
+    logger.info(
+        "Initializing OpenAI chat model (model=%s, temperature=%s)", resolved_model, resolved_temp
+    )
 
     # 4. Construct ChatOpenAI model
     try:

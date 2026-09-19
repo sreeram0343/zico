@@ -97,7 +97,9 @@ def build_prompt_context(state: TravelState) -> str:
         lines.append(f"Flight Operation Status: {flight_status}")
         flight_query = state.get("flight_query") or {}
         if flight_query:
-            clean_q = {k: v for k, v in flight_query.items() if v is not None and not k.startswith("raw_")}
+            clean_q = {
+                k: v for k, v in flight_query.items() if v is not None and not k.startswith("raw_")
+            }
             if clean_q:
                 lines.append(f"Flight Query Parameters: {clean_q}")
 
@@ -363,7 +365,9 @@ class ResponseAgent:
                     final_answer = cleaned
 
         except Exception as exc:
-            logger.warning("LLM model response generation failed: %s; using deterministic fallback", exc)
+            logger.warning(
+                "LLM model response generation failed: %s; using deterministic fallback", exc
+            )
 
         # 3. Deterministic Fallback if Model Call Failed or Produced Empty Output
         if not final_answer:
@@ -411,7 +415,9 @@ class ResponseAgent:
                 if cleaned:
                     final_answer = cleaned
         except Exception as exc:
-            logger.warning("LLM synchronous response generation failed: %s; using deterministic fallback", exc)
+            logger.warning(
+                "LLM synchronous response generation failed: %s; using deterministic fallback", exc
+            )
 
         if not final_answer:
             final_answer = generate_deterministic_fallback(state)

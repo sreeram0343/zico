@@ -31,25 +31,22 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any, List, Optional
+from typing import List, Optional
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from app.agents.research_agent import (
-    ResearchAgent,
     ResearchQueryDecision,
     run_research_agent,
 )
 from app.core.state import TravelState, create_initial_state
-from app.tools.location import ResolvedLocation
 from app.tools.tavily_search import (
     ResearchResult,
     TavilyAPIError,
     TavilySearchResponse,
     TavilyTimeoutError,
 )
-
 
 # ---------------------------------------------------------------------------
 # Test Helpers & Mock Fixtures
@@ -198,7 +195,10 @@ async def test_llm_assisted_query_generation() -> None:
         assert mock_runnable.invoke.called
         assert update["research_query"] == "Europe travel entry documentation official requirements"
         assert client.search.called
-        assert client.search.call_args[1]["query"] == "Europe travel entry documentation official requirements"
+        assert (
+            client.search.call_args[1]["query"]
+            == "Europe travel entry documentation official requirements"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -341,7 +341,9 @@ async def test_duplicate_result_handling() -> None:
     """Verify duplicate URLs in provider results are deduplicated while preserving order."""
     items = [
         make_mock_result(title="Result 1", url="https://example.com/visa"),
-        make_mock_result(title="Result 1 Duplicate", url="https://example.com/visa/"),  # trailing slash
+        make_mock_result(
+            title="Result 1 Duplicate", url="https://example.com/visa/"
+        ),  # trailing slash
         make_mock_result(title="Result 2", url="https://example.com/other-info"),
     ]
     client = mock_tavily_client(results=items)

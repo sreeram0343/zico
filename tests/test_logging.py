@@ -15,13 +15,13 @@ Covers:
 
 import logging
 from typing import Generator
+
 import pytest
 
 from app.core.config import settings
 from app.core.logging import (
-    DEFAULT_LOG_FORMAT,
-    FALLBACK_LOG_LEVEL,
     _ZICO_HANDLER_MARKER,
+    FALLBACK_LOG_LEVEL,
     configure_logging,
     get_logger,
     resolve_log_level,
@@ -34,6 +34,7 @@ def reset_logging_state() -> Generator[None, None, None]:
     root = logging.getLogger()
     original_level = root.level
     yield
+    root.setLevel(original_level)
     # Reconfigure back to original settings level
     configure_logging()
 
@@ -163,7 +164,9 @@ def test_logger_reuse():
     assert logger_a.name == "zico.test.reuse"
 
 
-def test_no_secret_leakage(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture, caplog: pytest.LogCaptureFixture):
+def test_no_secret_leakage(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture, caplog: pytest.LogCaptureFixture
+):
     """Test 9 — No secret leakage: configuration and logging do not expose API credentials."""
     fake_openai = "fake-openai-secret-key-999"
     fake_tavily = "fake-tavily-secret-token-888"

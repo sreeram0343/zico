@@ -4,3 +4,29 @@ testpaths = ["tests"]
 asyncio_mode = "auto"
 addopts = "-p no:langsmith -p no:cov --ignore=tests/test_api.py --ignore=tests/test_stream.py"
 
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+src = ["backend", "."]
+exclude = [
+    ".git",
+    ".pytest_cache",
+    "apps/web",
+    "backend/alembic",
+]
+
+[tool.ruff.lint]
+select = [
+    "E4",
+    "E7",
+    "E9",
+    "F",
+    "I",
+    "W",
+]
+ignore = [
+    "E501",
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["app"]

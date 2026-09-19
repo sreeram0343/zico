@@ -31,7 +31,6 @@ from __future__ import annotations
 
 import inspect
 import logging
-from typing import Any, Dict
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -41,7 +40,6 @@ from fastapi.testclient import TestClient
 from app.api.routes import router
 from app.api.schemas import ResponseStatus, TravelResponse
 from app.core.state import TravelState, create_initial_state
-
 
 # ---------------------------------------------------------------------------
 # Test Application Fixture
@@ -78,6 +76,7 @@ def test_valid_chat_request(client: TestClient) -> None:
     mock_final_state["workflow_status"] = "completed"
 
     with patch("app.api.routes.run_workflow", new_callable=AsyncMock) as mock_run:
+
         async def mock_exec(state: TravelState) -> TravelState:
             enriched = dict(state)
             enriched["final_response"] = "Flight EK522 from TRV to DXB is on time."
@@ -401,15 +400,16 @@ def test_no_direct_agent_or_tool_calls_from_route(client: TestClient) -> None:
     mock_final_state = create_initial_state("Q", "s", "r")
     mock_final_state["final_response"] = "Processed"
 
-    with patch("app.api.routes.run_workflow", new_callable=AsyncMock) as mock_run, \
-         patch("app.agents.router_agent.aroute_request") as mock_router, \
-         patch("app.agents.flight_agent.run_flight_agent") as mock_flight, \
-         patch("app.agents.research_agent.run_research_agent") as mock_research, \
-         patch("app.agents.validator_agent.run_validator_agent") as mock_validator, \
-         patch("app.agents.response_agent.run_response_agent") as mock_response, \
-         patch("app.tools.aviationstack.AviationStackClient") as mock_aviation, \
-         patch("app.tools.tavily_search.TavilySearchClient") as mock_tavily:
-
+    with (
+        patch("app.api.routes.run_workflow", new_callable=AsyncMock) as mock_run,
+        patch("app.agents.router_agent.aroute_request") as mock_router,
+        patch("app.agents.flight_agent.run_flight_agent") as mock_flight,
+        patch("app.agents.research_agent.run_research_agent") as mock_research,
+        patch("app.agents.validator_agent.run_validator_agent") as mock_validator,
+        patch("app.agents.response_agent.run_response_agent") as mock_response,
+        patch("app.tools.aviationstack.AviationStackClient") as mock_aviation,
+        patch("app.tools.tavily_search.TavilySearchClient") as mock_tavily,
+    ):
         mock_run.return_value = mock_final_state
 
         response = client.post("/api/v1/chat", json={"message": "Flight status"})
@@ -485,7 +485,9 @@ def test_internal_travel_state_fields_not_exposed(client: TestClient) -> None:
             "flight_query",
             "research_query",
         ]:
-            assert forbidden_key not in data, f"Internal key {forbidden_key!r} leaked to public response"
+            assert forbidden_key not in data, (
+                f"Internal key {forbidden_key!r} leaked to public response"
+            )
 
 
 # ---------------------------------------------------------------------------

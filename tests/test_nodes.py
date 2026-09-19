@@ -20,7 +20,7 @@ Validates:
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict
+from typing import Any
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -33,7 +33,6 @@ from app.graph.nodes import (
     router_node,
     validator_node,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixture: Sample TravelState
@@ -118,7 +117,13 @@ async def test_research_node_invokes_agent_and_returns_update(base_state: Travel
 
     expected_update = {
         "research_query": "Germany Schengen visa requirements travel",
-        "research_results": [{"title": "German Visa Portal", "url": "https://germany.diplo.de/visa", "content": "Valid passport required."}],
+        "research_results": [
+            {
+                "title": "German Visa Portal",
+                "url": "https://germany.diplo.de/visa",
+                "content": "Valid passport required.",
+            }
+        ],
         "research_status": "success",
         "active_agent": "research_agent",
         "completed_agents": ["research_agent"],
@@ -230,7 +235,9 @@ async def test_state_passed_intact_without_node_side_effects(base_state: TravelS
         (response_node, "app.graph.nodes.run_response_agent"),
     ],
 )
-async def test_agent_exception_propagation(node_fn: Any, agent_patch_path: str, base_state: TravelState) -> None:
+async def test_agent_exception_propagation(
+    node_fn: Any, agent_patch_path: str, base_state: TravelState
+) -> None:
     """Verify node adapters do not swallow agent exceptions."""
     custom_error = RuntimeError("Agent runtime failure simulation")
 
@@ -249,12 +256,13 @@ async def test_agent_exception_propagation(node_fn: Any, agent_patch_path: str, 
 @pytest.mark.asyncio
 async def test_no_duplicate_agent_invocation(base_state: TravelState) -> None:
     """Verify invoking a node triggers the underlying agent exactly once."""
-    with patch("app.graph.nodes.aroute_request", new_callable=AsyncMock) as m_router, \
-         patch("app.graph.nodes.run_flight_agent", new_callable=AsyncMock) as m_flight, \
-         patch("app.graph.nodes.run_research_agent", new_callable=AsyncMock) as m_research, \
-         patch("app.graph.nodes.run_validator_agent", new_callable=AsyncMock) as m_validator, \
-         patch("app.graph.nodes.run_response_agent", new_callable=AsyncMock) as m_response:
-
+    with (
+        patch("app.graph.nodes.aroute_request", new_callable=AsyncMock) as m_router,
+        patch("app.graph.nodes.run_flight_agent", new_callable=AsyncMock) as m_flight,
+        patch("app.graph.nodes.run_research_agent", new_callable=AsyncMock) as m_research,
+        patch("app.graph.nodes.run_validator_agent", new_callable=AsyncMock) as m_validator,
+        patch("app.graph.nodes.run_response_agent", new_callable=AsyncMock) as m_response,
+    ):
         m_router.return_value = {"intent": "flight"}
         m_flight.return_value = {"flight_status": "success"}
         m_research.return_value = {"research_status": "success"}
@@ -283,7 +291,9 @@ async def test_no_duplicate_agent_invocation(base_state: TravelState) -> None:
 
 
 @pytest.mark.asyncio
-async def test_logging_safety_no_secret_leakage(caplog: pytest.LogCaptureFixture, base_state: TravelState) -> None:
+async def test_logging_safety_no_secret_leakage(
+    caplog: pytest.LogCaptureFixture, base_state: TravelState
+) -> None:
     """Verify node execution logs do not contain API keys or private tokens."""
     caplog.set_level(logging.INFO)
 
@@ -338,6 +348,7 @@ def test_no_graph_construction_or_tool_execution_in_nodes() -> None:
         - import or call external HTTP clients / providers directly
     """
     import inspect
+
     import app.graph.nodes as nodes_module
 
     source_code = inspect.getsource(nodes_module)
@@ -351,7 +362,9 @@ def test_no_graph_construction_or_tool_execution_in_nodes() -> None:
         ".compile(",
     ]
     for token in prohibited_graph_tokens:
-        assert token not in source_code, f"app.graph.nodes must not contain graph construction token: {token!r}"
+        assert token not in source_code, (
+            f"app.graph.nodes must not contain graph construction token: {token!r}"
+        )
 
     # Must NOT directly invoke tools or HTTP clients
     prohibited_tool_tokens = [
@@ -364,4 +377,6 @@ def test_no_graph_construction_or_tool_execution_in_nodes() -> None:
         "OpenAI(",
     ]
     for token in prohibited_tool_tokens:
-        assert token not in source_code, f"app.graph.nodes must not directly call external tools/providers: {token!r}"
+        assert token not in source_code, (
+            f"app.graph.nodes must not directly call external tools/providers: {token!r}"
+        )

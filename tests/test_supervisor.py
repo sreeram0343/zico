@@ -1,7 +1,8 @@
 from unittest.mock import MagicMock, patch
+
 from langchain_core.messages import HumanMessage
 from langchain_core.runnables import RunnableLambda
-import pytest
+
 from app.graph.supervisor import RouteDecision, supervisor_node
 
 
@@ -30,7 +31,9 @@ def test_supervisor_node_routing_high_confidence(mock_chat_openai):
     mock_chat_openai.return_value = mock_llm_instance
 
     state = {
-        "messages": [HumanMessage(content="What are my rights if my flight is delayed by 4 hours in Paris?")]
+        "messages": [
+            HumanMessage(content="What are my rights if my flight is delayed by 4 hours in Paris?")
+        ]
     }
 
     result = supervisor_node(state)
@@ -49,9 +52,7 @@ def test_supervisor_node_ambiguous_low_confidence_fallback(mock_chat_openai):
     mock_llm_instance.with_structured_output.return_value = RunnableLambda(lambda x: mock_decision)
     mock_chat_openai.return_value = mock_llm_instance
 
-    state = {
-        "messages": [HumanMessage(content="Maybe something about tomorrow?")]
-    }
+    state = {"messages": [HumanMessage(content="Maybe something about tomorrow?")]}
 
     result = supervisor_node(state)
     assert result == {"next_node": "validator_node"}
@@ -64,9 +65,7 @@ def test_supervisor_node_exception_fallback(mock_chat_openai):
     mock_llm_instance.with_structured_output.side_effect = Exception("API connection failure")
     mock_chat_openai.return_value = mock_llm_instance
 
-    state = {
-        "messages": [HumanMessage(content="Hello ZICO")]
-    }
+    state = {"messages": [HumanMessage(content="Hello ZICO")]}
 
     result = supervisor_node(state)
     assert result == {"next_node": "validator_node"}

@@ -6,9 +6,10 @@ Unit tests for Core Foundation & Data Modeling:
 - Alembic migration scripts
 """
 
-from datetime import datetime, timedelta, timezone
 import os
 import sys
+from datetime import datetime, timedelta, timezone
+
 import pytest
 
 # Ensure environment does not hang on remote vector probes
@@ -18,19 +19,15 @@ os.environ["QDRANT_URL"] = ":memory:"
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "backend")))
 
 from app.core.config import Settings
+from app.db.models import AuditLog, Trip, TripSegmentModel, UserPreferenceModel
 from app.graph.state import (
-    ActionStatus,
-    ActionType,
     Location,
     SegmentType,
-    TripConstraints,
     TripSegment,
     TripState,
     UserPreferences,
     ZicoGraphState,
 )
-from app.db.models import AuditLog, Base, Trip, TripSegmentModel, UserPreferenceModel
-
 
 # ===========================================================================
 # 1. Environment Configuration & Settings Tests
@@ -43,7 +40,9 @@ def test_settings_valid_defaults():
     assert cfg.PROJECT_NAME == "ZICO Intelligent Travel Operations"
     assert cfg.APP_ENV in ["development", "staging", "production", "test"]
     assert cfg.LOG_LEVEL in ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
-    assert cfg.DATABASE_URL.startswith("postgresql+asyncpg://") or cfg.DATABASE_URL.startswith("postgresql://")
+    assert cfg.DATABASE_URL.startswith("postgresql+asyncpg://") or cfg.DATABASE_URL.startswith(
+        "postgresql://"
+    )
     assert cfg.sync_database_url.startswith("postgresql://")
     assert cfg.is_development is True or cfg.is_test is True or cfg.is_production is True
 
@@ -239,8 +238,12 @@ def test_trip_state_temporal_overlap_detection():
     t3 = datetime(2026, 10, 1, 12, 0, tzinfo=timezone.utc)  # Overlaps with t1-t2
     t4 = datetime(2026, 10, 1, 16, 0, tzinfo=timezone.utc)
 
-    flight1 = TripSegment(id="f1", type=SegmentType.FLIGHT, title="Flight 1", start_time=t1, end_time=t2, location=loc)
-    flight2 = TripSegment(id="f2", type=SegmentType.FLIGHT, title="Flight 2", start_time=t3, end_time=t4, location=loc)
+    flight1 = TripSegment(
+        id="f1", type=SegmentType.FLIGHT, title="Flight 1", start_time=t1, end_time=t2, location=loc
+    )
+    flight2 = TripSegment(
+        id="f2", type=SegmentType.FLIGHT, title="Flight 2", start_time=t3, end_time=t4, location=loc
+    )
 
     trip = TripState(trip_id="trip_conflict", user_id="user_1", itinerary=[flight1, flight2])
     overlaps = trip.has_temporal_overlap()
@@ -254,7 +257,15 @@ def test_zico_graph_state_to_trip_state():
     loc = Location(name="Paris", iata_code="CDG")
     t1 = datetime(2026, 11, 1, 9, 0, tzinfo=timezone.utc)
     t2 = datetime(2026, 11, 1, 12, 0, tzinfo=timezone.utc)
-    seg = TripSegment(id="fl_paris", type=SegmentType.FLIGHT, title="Air France", start_time=t1, end_time=t2, location=loc, cost=300.0)
+    seg = TripSegment(
+        id="fl_paris",
+        type=SegmentType.FLIGHT,
+        title="Air France",
+        start_time=t1,
+        end_time=t2,
+        location=loc,
+        cost=300.0,
+    )
 
     graph_state = ZicoGraphState(
         trip_id="trip_paris",

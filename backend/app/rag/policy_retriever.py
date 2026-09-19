@@ -73,6 +73,7 @@ class AsyncPolicyRetriever:
         Generates dense vector embeddings using OpenAI Async client or deterministic fallback.
         """
         from app.rag.service import _openai_quota_exhausted
+
         if (
             not _openai_quota_exhausted
             and settings.OPENAI_API_KEY
@@ -97,7 +98,6 @@ class AsyncPolicyRetriever:
                 logger.warning(f"Async OpenAI embedding generation failed, falling back: {exc}")
 
         return _compute_deterministic_embedding(text, dim=EMBEDDING_DIMENSION)
-
 
     async def index_policy(self, doc: PolicyDocument) -> bool:
         """
@@ -189,14 +189,16 @@ class AsyncPolicyRetriever:
             formatted: List[Dict[str, Any]] = []
             for p in points:
                 payload = p.payload or {}
-                formatted.append({
-                    "id": payload.get("doc_id", str(p.id)),
-                    "title": payload.get("title", "Unknown Policy"),
-                    "category": payload.get("category", "GENERAL"),
-                    "content": payload.get("content", ""),
-                    "metadata": payload.get("metadata", {}),
-                    "score": float(getattr(p, "score", 1.0)),
-                })
+                formatted.append(
+                    {
+                        "id": payload.get("doc_id", str(p.id)),
+                        "title": payload.get("title", "Unknown Policy"),
+                        "category": payload.get("category", "GENERAL"),
+                        "content": payload.get("content", ""),
+                        "metadata": payload.get("metadata", {}),
+                        "score": float(getattr(p, "score", 1.0)),
+                    }
+                )
             return formatted
 
         except (TimeoutError, asyncio.TimeoutError) as exc:

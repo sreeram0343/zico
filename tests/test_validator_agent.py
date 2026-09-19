@@ -34,10 +34,8 @@ import pytest
 from app.agents.validator_agent import (
     ValidatorAgent,
     run_validator_agent,
-    validate_state,
 )
 from app.core.state import TravelState, create_initial_state
-
 
 # ---------------------------------------------------------------------------
 # Test 36: Valid Flight State
@@ -254,7 +252,9 @@ async def test_invalid_intent() -> None:
     update = await run_validator_agent(state)
 
     assert update["validation_status"] == "failed"
-    assert any("invalid or missing intent 'hotel'" in err.lower() for err in update["validation_errors"])
+    assert any(
+        "invalid or missing intent 'hotel'" in err.lower() for err in update["validation_errors"]
+    )
     # Must NOT overwrite or replace intent in update
     assert "intent" not in update
 
@@ -278,7 +278,9 @@ async def test_missing_user_query() -> None:
         update = await run_validator_agent(state)
 
         assert update["validation_status"] == "failed"
-        assert any("missing or empty user_query" in err.lower() for err in update["validation_errors"])
+        assert any(
+            "missing or empty user_query" in err.lower() for err in update["validation_errors"]
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -325,7 +327,10 @@ async def test_invalid_passenger_count() -> None:
         update = await run_validator_agent(state)
 
         assert update["validation_status"] == "failed"
-        assert any("passengers must be an integer >= 1" in err.lower() for err in update["validation_errors"])
+        assert any(
+            "passengers must be an integer >= 1" in err.lower()
+            for err in update["validation_errors"]
+        )
 
 
 # ---------------------------------------------------------------------------

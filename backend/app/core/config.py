@@ -1,5 +1,5 @@
-import os
-from typing import Any, List, Literal, Optional
+from typing import Any, List, Literal
+
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -110,7 +110,9 @@ class Settings(BaseSettings):
         if isinstance(v, str):
             cleaned = v.strip().strip('"').strip("'").upper()
             if len(cleaned) != 3 or not cleaned.isalpha():
-                raise ValueError(f"DEFAULT_ORIGIN_IATA must be a 3-letter alphabetic code, got '{v}'")
+                raise ValueError(
+                    f"DEFAULT_ORIGIN_IATA must be a 3-letter alphabetic code, got '{v}'"
+                )
             return cleaned
         return v
 
@@ -146,7 +148,9 @@ class Settings(BaseSettings):
         if not v or not isinstance(v, str):
             raise ValueError("QDRANT_URL cannot be empty.")
         if v != ":memory:" and not (v.startswith("http://") or v.startswith("https://")):
-            raise ValueError(f"QDRANT_URL '{v}' must start with http://, https://, or be ':memory:'")
+            raise ValueError(
+                f"QDRANT_URL '{v}' must start with http://, https://, or be ':memory:'"
+            )
         return v
 
     # -----------------------------------------------------------------------

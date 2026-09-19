@@ -2,11 +2,12 @@
 Unit tests for backend/app/tools/flight_tool.py
 """
 
-from datetime import datetime, timedelta
-import sys
 import os
+import sys
+
 os.environ["QDRANT_URL"] = ":memory:"
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
+
 import pytest
 
 # Ensure backend directory is in path
@@ -25,7 +26,6 @@ from app.tools.flight_tool import (
     search_flights_aviationstack,
     track_flight_disruption,
     track_flight_status,
-    aviationstack_flight_search,
 )
 
 
@@ -180,7 +180,9 @@ def test_parse_flight_invalid_chronology_raises_error():
         "flight": {"iata": "BG201"},
         "airline": {"name": "Biman"},
     }
-    with pytest.raises(FlightToolValidationError, match="arrival.*must be strictly after departure"):
+    with pytest.raises(
+        FlightToolValidationError, match="arrival.*must be strictly after departure"
+    ):
         parse_flight_to_trip_segment(invalid_flight_entry)
 
 
@@ -298,8 +300,23 @@ def test_track_flight_status_tool(mock_status):
         "flight_number": "BG201",
         "airline": "Biman Bangladesh",
         "status": "scheduled",
-        "departure": {"airport": "Hazrat Shahjalal", "iata": "DAC", "terminal": "2", "gate": "4", "scheduled": "2026-09-08 08:00", "delay_minutes": 0},
-        "arrival": {"airport": "Heathrow", "iata": "LHR", "terminal": "4", "gate": "12", "baggage": "6", "scheduled": "2026-09-08 18:30", "delay_minutes": 0},
+        "departure": {
+            "airport": "Hazrat Shahjalal",
+            "iata": "DAC",
+            "terminal": "2",
+            "gate": "4",
+            "scheduled": "2026-09-08 08:00",
+            "delay_minutes": 0,
+        },
+        "arrival": {
+            "airport": "Heathrow",
+            "iata": "LHR",
+            "terminal": "4",
+            "gate": "12",
+            "baggage": "6",
+            "scheduled": "2026-09-08 18:30",
+            "delay_minutes": 0,
+        },
     }
     res = track_flight_status.invoke({"flight_number": "BG201"})
     assert "Biman Bangladesh" in res

@@ -1,13 +1,15 @@
-from datetime import datetime, timedelta
 import logging
-from typing import Any, Dict, List, Optional
 import uuid
+from datetime import datetime, timedelta
+from typing import Any, Dict, List, Optional
+
 import dateutil.parser
-from langchain_core.tools import tool
 import requests
+from langchain_core.tools import tool
 
 # pyrefly: ignore [missing-import]
 from app.core.config import settings
+
 # pyrefly: ignore [missing-import]
 from app.graph.state import Location, SegmentType, TripSegment
 
@@ -22,7 +24,9 @@ class AviationStackClient:
         api_key: Optional[str] = None,
         base_url: str = "https://api.aviationstack.com/v1",
     ) -> None:
-        self.api_key = (api_key if api_key is not None else getattr(settings, "AVIATIONSTACK_API_KEY", "")).strip()
+        self.api_key = (
+            api_key if api_key is not None else getattr(settings, "AVIATIONSTACK_API_KEY", "")
+        ).strip()
         self.base_url = base_url.rstrip("/")
 
     def search(self, params: Dict[str, Any]) -> Dict[str, Any]:
@@ -70,6 +74,7 @@ client = AviationStackClient(api_key=settings.AVIATIONSTACK_API_KEY)
 
 class FlightSearchValidationError(ValueError):
     """Raised when AviationStack flight search response contains malformed or unparseable data."""
+
     pass
 
 
@@ -92,17 +97,23 @@ def parse_flight_to_trip_segment(
     Raises FlightSearchValidationError on malformed or missing required fields.
     """
     if not isinstance(flight_entry, dict):
-        raise FlightSearchValidationError(f"Expected dict for flight entry, received {type(flight_entry).__name__}")
+        raise FlightSearchValidationError(
+            f"Expected dict for flight entry, received {type(flight_entry).__name__}"
+        )
 
     # Check for direct AviationStack flight object format (top-level departure and arrival)
     if "departure" in flight_entry and "arrival" in flight_entry:
         dep_data = flight_entry.get("departure")
         if not dep_data or not isinstance(dep_data, dict):
-            raise FlightSearchValidationError("Malformed flight leg: missing 'departure_airport' data")
+            raise FlightSearchValidationError(
+                "Malformed flight leg: missing 'departure_airport' data"
+            )
 
         arr_data = flight_entry.get("arrival")
         if not arr_data or not isinstance(arr_data, dict):
-            raise FlightSearchValidationError("Malformed flight leg: missing 'arrival_airport' data")
+            raise FlightSearchValidationError(
+                "Malformed flight leg: missing 'arrival_airport' data"
+            )
 
         dep_time_str = (
             dep_data.get("scheduled")
@@ -137,20 +148,26 @@ def parse_flight_to_trip_segment(
         airline_data = flight_entry.get("airline") or {}
         flight_data = flight_entry.get("flight") or {}
 
-        airline_str = (
-            airline_data.get("name")
-            or airline_data.get("iata")
-            or "Commercial Airline"
-        )
+        airline_str = airline_data.get("name") or airline_data.get("iata") or "Commercial Airline"
         flight_num_str = (
             flight_data.get("iata")
             or flight_data.get("number")
             or f"FL-{uuid.uuid4().hex[:4].upper()}"
         )
 
-        dep_name = dep_data.get("airport") or dep_data.get("name") or dep_data.get("iata") or "Departure Airport"
+        dep_name = (
+            dep_data.get("airport")
+            or dep_data.get("name")
+            or dep_data.get("iata")
+            or "Departure Airport"
+        )
         dep_iata = dep_data.get("iata") or dep_data.get("id") or ""
-        arr_name = arr_data.get("airport") or arr_data.get("name") or arr_data.get("iata") or "Arrival Airport"
+        arr_name = (
+            arr_data.get("airport")
+            or arr_data.get("name")
+            or arr_data.get("iata")
+            or "Arrival Airport"
+        )
         arr_iata = arr_data.get("iata") or arr_data.get("id") or ""
 
         location = Location(
@@ -162,7 +179,9 @@ def parse_flight_to_trip_segment(
         try:
             cost = float(raw_price) if raw_price is not None else 0.0
         except (ValueError, TypeError) as exc:
-            raise FlightSearchValidationError(f"Invalid flight price value '{raw_price}': {exc}") from exc
+            raise FlightSearchValidationError(
+                f"Invalid flight price value '{raw_price}': {exc}"
+            ) from exc
 
         seg_id = f"flight_{flight_num_str}".replace(" ", "_")
 
@@ -189,7 +208,9 @@ def parse_flight_to_trip_segment(
     # Format with legs array ("flights")
     legs = flight_entry.get("flights")
     if not legs or not isinstance(legs, list):
-        raise FlightSearchValidationError("Malformed AviationStack response: 'flights' list is missing or empty")
+        raise FlightSearchValidationError(
+            "Malformed AviationStack response: 'flights' list is missing or empty"
+        )
 
     first_leg = legs[0]
     last_leg = legs[-1]
@@ -222,7 +243,9 @@ def parse_flight_to_trip_segment(
     airline_str = ", ".join(dict.fromkeys(airlines)) if airlines else "Airline"
 
     flight_numbers = [leg.get("flight_number") for leg in legs if leg.get("flight_number")]
-    flight_num_str = ", ".join(flight_numbers) if flight_numbers else f"FL-{uuid.uuid4().hex[:4].upper()}"
+    flight_num_str = (
+        ", ".join(flight_numbers) if flight_numbers else f"FL-{uuid.uuid4().hex[:4].upper()}"
+    )
 
     arr_name = arr_airport.get("name") or arr_airport.get("id") or "Unknown Airport"
     arr_iata = arr_airport.get("id")
@@ -236,7 +259,9 @@ def parse_flight_to_trip_segment(
     try:
         cost = float(raw_price) if raw_price is not None else 0.0
     except (ValueError, TypeError) as exc:
-        raise FlightSearchValidationError(f"Invalid flight price value '{raw_price}': {exc}") from exc
+        raise FlightSearchValidationError(
+            f"Invalid flight price value '{raw_price}': {exc}"
+        ) from exc
 
     seg_id = f"flight_{first_leg.get('flight_number', uuid.uuid4().hex[:6])}".replace(" ", "_")
 
@@ -364,7 +389,11 @@ def search_flights(
     else:
         outbound_date = outbound_date.strip()
 
-    if not settings.AVIATIONSTACK_API_KEY or settings.AVIATIONSTACK_API_KEY.startswith("test") or settings.AVIATIONSTACK_API_KEY == "":
+    if (
+        not settings.AVIATIONSTACK_API_KEY
+        or settings.AVIATIONSTACK_API_KEY.startswith("test")
+        or settings.AVIATIONSTACK_API_KEY == ""
+    ):
         logger.info("AviationStack API key not configured in environment.")
         return []
 

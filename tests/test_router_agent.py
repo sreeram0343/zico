@@ -9,8 +9,9 @@ All tests run locally with mocked models and zero network/provider access.
 
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any
 from unittest.mock import MagicMock, patch
+
 import pytest
 
 from app.agents.router_agent import (
@@ -20,7 +21,6 @@ from app.agents.router_agent import (
     route_request,
 )
 from app.core.state import TravelState, create_initial_state
-
 
 # ---------------------------------------------------------------------------
 # Test Helpers & Fixtures
@@ -184,9 +184,7 @@ def test_empty_query_handling() -> None:
 def test_invalid_model_intent_fallback() -> None:
     """Verify unsupported intents like 'hotel' do not enter state and fall back safely."""
     # Simulate a raw dictionary returned with an invalid intent category
-    mock_model = MockStructuredModel(
-        return_decision={"intent": "hotel", "confidence": 0.8}
-    )
+    mock_model = MockStructuredModel(return_decision={"intent": "hotel", "confidence": 0.8})
 
     state: TravelState = create_initial_state(
         user_query="Book a 5 star hotel in Paris.",
@@ -313,10 +311,11 @@ def test_no_tool_execution() -> None:
         request_id="req-notools",
     )
 
-    with patch("app.tools.aviationstack.AviationStackClient") as mock_aviation, \
-         patch("app.tools.tavily_search.TavilySearchClient") as mock_tavily, \
-         patch("app.tools.location.LocationResolver") as mock_location:
-
+    with (
+        patch("app.tools.aviationstack.AviationStackClient") as mock_aviation,
+        patch("app.tools.tavily_search.TavilySearchClient") as mock_tavily,
+        patch("app.tools.location.LocationResolver") as mock_location,
+    ):
         update = route_request(state, llm=mock_model)
 
         assert update["intent"] == "flight"

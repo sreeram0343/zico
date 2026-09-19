@@ -26,8 +26,8 @@ import re
 from typing import Any, Dict, List, Optional
 
 import airportsdata
-from pydantic import BaseModel, Field
 import pycountry
+from pydantic import BaseModel, Field
 
 from app.core.logging import get_logger
 
@@ -454,16 +454,33 @@ class LocationResolver:
         if len(tokens) > 1:
             for token in tokens:
                 token_upper = token.upper()
-                if len(token_upper) == 3 and token_upper.isalpha() and token_upper in self._iata_index:
+                if (
+                    len(token_upper) == 3
+                    and token_upper.isalpha()
+                    and token_upper in self._iata_index
+                ):
                     raw_apt = self._iata_index[token_upper]
                     cand = self._normalize_record(raw_apt)
                     if cand:
                         cand_city = (cand.city or "").lower()
                         cand_name = cand.name.lower()
                         # Check if query's other words match the airport's city or name
-                        query_without_code = re.sub(rf"\b{re.escape(token)}\b", "", cleaned, flags=re.IGNORECASE).strip().lower()
-                        if cand_city in query_without_code or query_without_code in cand_city or cand_name in lower_query or query_without_code in cand_name:
-                            logger.info("Location resolved via compound IATA match: %s -> %s", cleaned, cand.name)
+                        query_without_code = (
+                            re.sub(rf"\b{re.escape(token)}\b", "", cleaned, flags=re.IGNORECASE)
+                            .strip()
+                            .lower()
+                        )
+                        if (
+                            cand_city in query_without_code
+                            or query_without_code in cand_city
+                            or cand_name in lower_query
+                            or query_without_code in cand_name
+                        ):
+                            logger.info(
+                                "Location resolved via compound IATA match: %s -> %s",
+                                cleaned,
+                                cand.name,
+                            )
                             return ResolvedLocation(
                                 query=cleaned,
                                 status="resolved",
@@ -489,7 +506,9 @@ class LocationResolver:
             candidates = [c for c in (self._normalize_record(r) for r in matching_raw) if c]
             if len(candidates) == 1:
                 cand = candidates[0]
-                logger.info("Location resolved via exact airport name: %s -> %s", cleaned, cand.name)
+                logger.info(
+                    "Location resolved via exact airport name: %s -> %s", cleaned, cand.name
+                )
                 return ResolvedLocation(
                     query=cleaned,
                     status="resolved",
@@ -509,7 +528,11 @@ class LocationResolver:
                     matches=[cand],
                 )
             elif len(candidates) > 1:
-                logger.info("Location is ambiguous for airport name: %s (matches=%d)", cleaned, len(candidates))
+                logger.info(
+                    "Location is ambiguous for airport name: %s (matches=%d)",
+                    cleaned,
+                    len(candidates),
+                )
                 return ResolvedLocation(
                     query=cleaned,
                     status="ambiguous",
@@ -551,7 +574,9 @@ class LocationResolver:
                     )
 
         # 7. City Name and City Aliases
-        target_city = CITY_ALIASES.get(lower_query, CITY_ALIASES.get(stripped_airport, stripped_airport))
+        target_city = CITY_ALIASES.get(
+            lower_query, CITY_ALIASES.get(stripped_airport, stripped_airport)
+        )
         city_raw_matches = self._city_index.get(target_city, [])
 
         if not city_raw_matches and target_city != lower_query:
@@ -564,7 +589,9 @@ class LocationResolver:
             commercial_candidates = [c for c in candidates if not _is_military_facility(c.name)]
             effective_candidates = commercial_candidates if commercial_candidates else candidates
 
-            display_city = CITY_DISPLAY_NAMES.get(target_city, effective_candidates[0].city or cleaned.title())
+            display_city = CITY_DISPLAY_NAMES.get(
+                target_city, effective_candidates[0].city or cleaned.title()
+            )
 
             # Check if all candidates belong to distinct states/countries (e.g. "Springfield")
             subdivisions = {c.subdivision for c in effective_candidates if c.subdivision}
@@ -574,7 +601,12 @@ class LocationResolver:
                 # If there's only 1 commercial candidate after filtering out military facilities:
                 if len(effective_candidates) == 1:
                     cand = effective_candidates[0]
-                    logger.info("Location resolved via city: %s -> %s (%s)", cleaned, display_city, cand.iata)
+                    logger.info(
+                        "Location resolved via city: %s -> %s (%s)",
+                        cleaned,
+                        display_city,
+                        cand.iata,
+                    )
                     return ResolvedLocation(
                         query=cleaned,
                         status="resolved",
@@ -594,7 +626,9 @@ class LocationResolver:
                         matches=[cand],
                     )
 
-                logger.info("Location is ambiguous: %s (matches=%d)", cleaned, len(effective_candidates))
+                logger.info(
+                    "Location is ambiguous: %s (matches=%d)", cleaned, len(effective_candidates)
+                )
                 return ResolvedLocation(
                     query=cleaned,
                     status="ambiguous",
@@ -608,7 +642,9 @@ class LocationResolver:
                 )
             elif len(effective_candidates) == 1:
                 cand = effective_candidates[0]
-                logger.info("Location resolved via city: %s -> %s (%s)", cleaned, display_city, cand.iata)
+                logger.info(
+                    "Location resolved via city: %s -> %s (%s)", cleaned, display_city, cand.iata
+                )
                 return ResolvedLocation(
                     query=cleaned,
                     status="resolved",

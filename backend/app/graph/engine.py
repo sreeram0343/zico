@@ -1,14 +1,19 @@
-from datetime import datetime, timedelta
 import logging
 import re
-from typing import Any, Dict, List, Literal, Optional
 import uuid
+from datetime import datetime, timedelta
+from typing import Any, Dict, List, Optional
+
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
-from langgraph.types import Command, interrupt
+from langgraph.types import interrupt
 
-from app.graph.disruption import DisruptionEvent, analyze_disruption, create_recovery_action
+from app.graph.disruption import (
+    DisruptionEvent,
+    analyze_disruption,
+    create_recovery_action,
+)
 from app.graph.state import (
     ActionStatus,
     ActionType,
@@ -221,16 +226,20 @@ def flight_search_worker_node(state: ZicoGraphState | Dict[str, Any]) -> Dict[st
 
     flight_results: List[TripSegment] = []
     try:
-        results = search_flights.invoke({
-            "departure_id": origin,
-            "arrival_id": destination,
-            "outbound_date": future_date,
-            "currency": "USD",
-        })
+        results = search_flights.invoke(
+            {
+                "departure_id": origin,
+                "arrival_id": destination,
+                "outbound_date": future_date,
+                "currency": "USD",
+            }
+        )
         if isinstance(results, list) and len(results) > 0 and isinstance(results[0], TripSegment):
             flight_results = results
     except Exception as exc:
-        logger.warning(f"Live flight search query notice ({exc}), generating high-fidelity flight options.")
+        logger.warning(
+            f"Live flight search query notice ({exc}), generating high-fidelity flight options."
+        )
 
     # If no live results returned, populate validated fallback options
     if not flight_results:
@@ -307,8 +316,7 @@ def disruption_worker_node(state: ZicoGraphState | Dict[str, Any]) -> Dict[str, 
         existing_disruptions = getattr(state, "active_disruptions", [])
 
     itinerary = [
-        s if isinstance(s, TripSegment) else TripSegment.model_validate(s)
-        for s in raw_itinerary
+        s if isinstance(s, TripSegment) else TripSegment.model_validate(s) for s in raw_itinerary
     ]
     constraints = (
         raw_constraints
@@ -328,12 +336,14 @@ def disruption_worker_node(state: ZicoGraphState | Dict[str, Any]) -> Dict[str, 
             reason="Inbound aircraft maintenance delay",
         )
         impact = analyze_disruption(itinerary, event, constraints)
-        new_disruptions.append({
-            "type": "DISRUPTION_IMPACT",
-            "affected_segment_id": impact.affected_segment_id,
-            "severity": impact.severity,
-            "summary": impact.summary,
-        })
+        new_disruptions.append(
+            {
+                "type": "DISRUPTION_IMPACT",
+                "affected_segment_id": impact.affected_segment_id,
+                "severity": impact.severity,
+                "summary": impact.summary,
+            }
+        )
 
         action = create_recovery_action(itinerary, impact, event, constraints)
         if not action:
@@ -377,20 +387,27 @@ def booking_approval_node(state: ZicoGraphState | Dict[str, Any]) -> Dict[str, A
         raw_itinerary = getattr(state, "itinerary", [])
 
     actions: List[PendingAction] = [
-        a if isinstance(a, PendingAction) else PendingAction.model_validate(a)
-        for a in raw_actions
+        a if isinstance(a, PendingAction) else PendingAction.model_validate(a) for a in raw_actions
     ]
     itinerary: List[TripSegment] = [
-        s if isinstance(s, TripSegment) else TripSegment.model_validate(s)
-        for s in raw_itinerary
+        s if isinstance(s, TripSegment) else TripSegment.model_validate(s) for s in raw_itinerary
     ]
 
-    high_impact_types = {ActionType.BOOKING, ActionType.CANCELLATION, ActionType.PAYMENT, ActionType.RESCHEDULE}
+    high_impact_types = {
+        ActionType.BOOKING,
+        ActionType.CANCELLATION,
+        ActionType.PAYMENT,
+        ActionType.RESCHEDULE,
+    }
     updated_actions: List[PendingAction] = []
     messages_out: List[BaseMessage] = []
 
     for action in actions:
-        if action.status == ActionStatus.PENDING and action.requires_explicit_approval and action.action_type in high_impact_types:
+        if (
+            action.status == ActionStatus.PENDING
+            and action.requires_explicit_approval
+            and action.action_type in high_impact_types
+        ):
             interrupt_payload = {
                 "action_id": action.action_id,
                 "action_type": action.action_type.value,
@@ -414,26 +431,34 @@ def booking_approval_node(state: ZicoGraphState | Dict[str, Any]) -> Dict[str, A
                 updated_action = action.model_copy(update={"status": ActionStatus.APPROVED})
                 updated_actions.append(updated_action)
 
-                seg_id = action.payload.get("affected_segment_id") or action.payload.get("segment_id")
+                seg_id = action.payload.get("affected_segment_id") or action.payload.get(
+                    "segment_id"
+                )
                 if seg_id:
                     for i, seg in enumerate(itinerary):
                         if seg.id == seg_id:
                             itinerary[i] = seg.model_copy(update={"is_confirmed": True})
 
-                messages_out.append(AIMessage(
-                    content=f"**Action Confirmed**: Successfully approved and executed '{action.description}' (Authorized by: {approver_actor})."
-                ))
+                messages_out.append(
+                    AIMessage(
+                        content=f"**Action Confirmed**: Successfully approved and executed '{action.description}' (Authorized by: {approver_actor})."
+                    )
+                )
             else:
                 updated_action = action.model_copy(update={"status": ActionStatus.REJECTED})
                 updated_actions.append(updated_action)
-                messages_out.append(AIMessage(
-                    content=f"**Action Cancelled**: Execution of '{action.description}' was rejected by traveler."
-                ))
+                messages_out.append(
+                    AIMessage(
+                        content=f"**Action Cancelled**: Execution of '{action.description}' was rejected by traveler."
+                    )
+                )
         else:
             updated_actions.append(action)
 
     if not messages_out:
-        messages_out.append(AIMessage(content="No pending actions requiring traveler confirmation."))
+        messages_out.append(
+            AIMessage(content="No pending actions requiring traveler confirmation.")
+        )
 
     return {
         "pending_actions": updated_actions,
@@ -450,12 +475,12 @@ def validator_node(state: ZicoGraphState | Dict[str, Any]) -> Dict[str, Any]:
         raw_itinerary = state.get("itinerary", [])
         raw_constraints = state.get("constraints", TripConstraints())
         existing_disruptions = state.get("active_disruptions", [])
-        messages = state.get("messages", [])
+        _messages = state.get("messages", [])
     else:
         raw_itinerary = getattr(state, "itinerary", [])
         raw_constraints = getattr(state, "constraints", TripConstraints())
         existing_disruptions = getattr(state, "active_disruptions", [])
-        messages = getattr(state, "messages", [])
+        _messages = getattr(state, "messages", [])
 
     itinerary: List[TripSegment] = []
     for seg in raw_itinerary:
@@ -474,26 +499,34 @@ def validator_node(state: ZicoGraphState | Dict[str, Any]) -> Dict[str, Any]:
     conflicts = detect_itinerary_conflicts(itinerary, constraints)
 
     disruptions: List[Dict[str, Any]] = [
-        d for d in existing_disruptions if d.get("type") not in ("ITINERARY_CONFLICT", "BUDGET_EXCEEDED")
+        d
+        for d in existing_disruptions
+        if d.get("type") not in ("ITINERARY_CONFLICT", "BUDGET_EXCEEDED")
     ]
 
     for c in conflicts:
-        disruptions.append({
-            "type": "ITINERARY_CONFLICT",
-            "segment_a_id": c.segment_a_id,
-            "segment_b_id": c.segment_b_id,
-            "reason": c.reason,
-            "deficit_minutes": c.deficit_minutes,
-        })
+        disruptions.append(
+            {
+                "type": "ITINERARY_CONFLICT",
+                "segment_a_id": c.segment_a_id,
+                "segment_b_id": c.segment_b_id,
+                "reason": c.reason,
+                "deficit_minutes": c.deficit_minutes,
+            }
+        )
 
-    if constraints.max_budget is not None and not validate_budget_cap(itinerary, constraints.max_budget):
+    if constraints.max_budget is not None and not validate_budget_cap(
+        itinerary, constraints.max_budget
+    ):
         total_cost = sum(seg.cost for seg in itinerary)
-        disruptions.append({
-            "type": "BUDGET_EXCEEDED",
-            "max_budget": constraints.max_budget,
-            "current_total": total_cost,
-            "reason": f"Total itinerary cost ({total_cost}) exceeds budget cap ({constraints.max_budget})",
-        })
+        disruptions.append(
+            {
+                "type": "BUDGET_EXCEEDED",
+                "max_budget": constraints.max_budget,
+                "current_total": total_cost,
+                "reason": f"Total itinerary cost ({total_cost}) exceeds budget cap ({constraints.max_budget})",
+            }
+        )
 
     return {"active_disruptions": disruptions}
 
@@ -514,12 +547,33 @@ def supervisor_router(state: ZicoGraphState | Dict[str, Any]) -> str:
         pending_actions = getattr(state, "pending_actions", [])
         next_node = getattr(state, "next_node", None)
 
-    high_impact_types = {"BOOKING", "CANCELLATION", "PAYMENT", "RESCHEDULE", ActionType.BOOKING, ActionType.CANCELLATION, ActionType.PAYMENT, ActionType.RESCHEDULE}
+    high_impact_types = {
+        "BOOKING",
+        "CANCELLATION",
+        "PAYMENT",
+        "RESCHEDULE",
+        ActionType.BOOKING,
+        ActionType.CANCELLATION,
+        ActionType.PAYMENT,
+        ActionType.RESCHEDULE,
+    }
     for action in pending_actions:
-        a_type = getattr(action, "action_type", None) or (action.get("action_type") if isinstance(action, dict) else None)
-        a_status = getattr(action, "status", None) or (action.get("status") if isinstance(action, dict) else None)
-        a_req = getattr(action, "requires_explicit_approval", True) if not isinstance(action, dict) else action.get("requires_explicit_approval", True)
-        if a_req and str(a_status).upper() in ("PENDING", "ACTIONSTATUS.PENDING") and a_type in high_impact_types:
+        a_type = getattr(action, "action_type", None) or (
+            action.get("action_type") if isinstance(action, dict) else None
+        )
+        a_status = getattr(action, "status", None) or (
+            action.get("status") if isinstance(action, dict) else None
+        )
+        a_req = (
+            getattr(action, "requires_explicit_approval", True)
+            if not isinstance(action, dict)
+            else action.get("requires_explicit_approval", True)
+        )
+        if (
+            a_req
+            and str(a_status).upper() in ("PENDING", "ACTIONSTATUS.PENDING")
+            and a_type in high_impact_types
+        ):
             return "booking_approval_node"
 
     valid_destinations = {

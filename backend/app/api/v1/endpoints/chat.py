@@ -1,14 +1,15 @@
-from typing import Any, Dict, List, Optional
 import uuid
+from typing import Any, Dict, List, Optional
+
 from fastapi import APIRouter, HTTPException
 from langchain_core.messages import AIMessage, HumanMessage
 from pydantic import BaseModel, Field
+
 from app.graph.engine import graph_engine
 from app.graph.state import (
     PendingAction,
     TripConstraints,
     TripSegment,
-    ZicoGraphState,
 )
 
 router = APIRouter()
@@ -50,7 +51,9 @@ async def chat_interaction(request: ChatRequest) -> ChatResponse:
         existing_values = {}
 
     current_itinerary = request.itinerary or existing_values.get("itinerary", [])
-    current_constraints = request.constraints or existing_values.get("constraints", TripConstraints())
+    current_constraints = request.constraints or existing_values.get(
+        "constraints", TripConstraints()
+    )
     current_actions = existing_values.get("pending_actions", [])
     current_disruptions = existing_values.get("active_disruptions", [])
 

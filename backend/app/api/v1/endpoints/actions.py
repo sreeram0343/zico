@@ -1,9 +1,11 @@
-from typing import Any, Dict, List, Optional
 import uuid
-from fastapi import APIRouter, Depends, HTTPException, status
+from typing import Any, Dict, List, Optional
+
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.db.models import AuditLog, Trip
 from app.db.session import get_db
 from app.graph.disruption import apply_recovery_action
@@ -54,8 +56,7 @@ async def approve_action(
     current_state = dict(trip.state_json or {})
     raw_itinerary = current_state.get("itinerary", [])
     itinerary = [
-        s if isinstance(s, TripSegment) else TripSegment.model_validate(s)
-        for s in raw_itinerary
+        s if isinstance(s, TripSegment) else TripSegment.model_validate(s) for s in raw_itinerary
     ]
 
     action = PendingAction(
@@ -122,8 +123,7 @@ async def reject_action(
     current_state = dict(trip.state_json or {})
     raw_itinerary = current_state.get("itinerary", [])
     itinerary = [
-        s if isinstance(s, TripSegment) else TripSegment.model_validate(s)
-        for s in raw_itinerary
+        s if isinstance(s, TripSegment) else TripSegment.model_validate(s) for s in raw_itinerary
     ]
 
     audit = AuditLog(

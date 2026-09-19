@@ -3,17 +3,17 @@ import logging
 import math
 import os
 from typing import Any, Dict, List, Optional
-from pydantic import BaseModel, Field
 
+from pydantic import BaseModel, Field
 from qdrant_client import QdrantClient
 from qdrant_client.http import models as qmodels
+
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
 EMBEDDING_DIMENSION = 1536
 _openai_quota_exhausted = False
-
 
 
 class PolicyDocument(BaseModel):
@@ -125,7 +125,9 @@ def _compute_deterministic_embedding(text: str, dim: int = EMBEDDING_DIMENSION) 
 class PolicyRAGService:
     """Manages vector embeddings, indexing, and semantic search for travel policies in Qdrant."""
 
-    def __init__(self, client: Optional[QdrantClient] = None, collection_name: Optional[str] = None):
+    def __init__(
+        self, client: Optional[QdrantClient] = None, collection_name: Optional[str] = None
+    ):
         self.collection_name = collection_name or settings.QDRANT_COLLECTION
         if client is not None:
             self.client = client
@@ -135,6 +137,7 @@ class PolicyRAGService:
             if settings.QDRANT_URL and settings.QDRANT_URL != ":memory:":
                 try:
                     import urllib.request
+
                     req = urllib.request.Request(
                         f"{settings.QDRANT_URL.rstrip('/')}/collections",
                         headers={"User-Agent": "ZicoRAG/1.0"},
@@ -158,7 +161,6 @@ class PolicyRAGService:
                 self.client = QdrantClient(":memory:")
 
         self._ensure_collection()
-
 
     def _ensure_collection(self) -> None:
         """Initializes the vector collection if it does not already exist."""
@@ -189,6 +191,7 @@ class PolicyRAGService:
         ):
             try:
                 from openai import OpenAI
+
                 oai = OpenAI(api_key=settings.OPENAI_API_KEY, timeout=2.0, max_retries=0)
                 resp = oai.embeddings.create(
                     input=text,
@@ -198,10 +201,10 @@ class PolicyRAGService:
             except Exception as exc:
                 if "quota" in str(exc).lower() or "429" in str(exc):
                     _openai_quota_exhausted = True
-                logger.warning(f"OpenAI embedding generation failed, falling back to deterministic: {exc}")
+                logger.warning(
+                    f"OpenAI embedding generation failed, falling back to deterministic: {exc}"
+                )
         return _compute_deterministic_embedding(text, dim=EMBEDDING_DIMENSION)
-
-
 
     def index_document(self, doc: PolicyDocument) -> None:
         """Indexes a PolicyDocument into Qdrant."""
@@ -279,14 +282,16 @@ class PolicyRAGService:
         formatted: List[Dict[str, Any]] = []
         for p in points:
             payload = p.payload or {}
-            formatted.append({
-                "id": payload.get("doc_id", str(p.id)),
-                "title": payload.get("title", "Unknown Policy"),
-                "category": payload.get("category", "GENERAL"),
-                "content": payload.get("content", ""),
-                "metadata": payload.get("metadata", {}),
-                "score": float(getattr(p, "score", 1.0)),
-            })
+            formatted.append(
+                {
+                    "id": payload.get("doc_id", str(p.id)),
+                    "title": payload.get("title", "Unknown Policy"),
+                    "category": payload.get("category", "GENERAL"),
+                    "content": payload.get("content", ""),
+                    "metadata": payload.get("metadata", {}),
+                    "score": float(getattr(p, "score", 1.0)),
+                }
+            )
         return formatted
 
     def format_rag_context(self, query: str, limit: int = 3) -> str:

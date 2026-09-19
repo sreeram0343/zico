@@ -284,9 +284,7 @@ class TravelResponse(BaseModel):
         coerced: List[Any] = []
         for item in value:
             if isinstance(item, str):
-                coerced.append(
-                    APIError(code=APIErrorCode.INTERNAL_ERROR, message=item)
-                )
+                coerced.append(APIError(code=APIErrorCode.INTERNAL_ERROR, message=item))
             else:
                 coerced.append(item)
         return coerced

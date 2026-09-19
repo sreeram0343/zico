@@ -1,13 +1,13 @@
-from datetime import datetime, timedelta
 import io
+from datetime import datetime, timedelta
 from unittest.mock import patch
+
 import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.db.models import Base
 from app.db.session import get_db
-from app.graph.state import Location, SegmentType, TripConstraints, TripSegment
 from app.main import app
 
 # In-memory SQLite for isolated API tests
@@ -214,7 +214,11 @@ async def test_flights_search_endpoint(client: AsyncClient):
                     {
                         "airline": "Delta Air Lines",
                         "flight_number": "DL 89",
-                        "departure_airport": {"name": "JFK", "id": "JFK", "time": "2026-10-10 19:00"},
+                        "departure_airport": {
+                            "name": "JFK",
+                            "id": "JFK",
+                            "time": "2026-10-10 19:00",
+                        },
                         "arrival_airport": {"name": "CDG", "id": "CDG", "time": "2026-10-11 08:30"},
                         "duration": 450,
                     }
@@ -238,7 +242,6 @@ async def test_flights_search_endpoint(client: AsyncClient):
         assert data[0]["type"] == "FLIGHT"
         assert data[0]["cost"] == 680.0
         assert data[0]["location"]["iata_code"] == "CDG"
-
 
 
 @pytest.mark.asyncio

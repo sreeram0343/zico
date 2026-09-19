@@ -1,5 +1,10 @@
 import pytest
-from app.services.voice import VoiceService, _generate_synthetic_wav_bytes, get_voice_service
+
+from app.services.voice import (
+    VoiceService,
+    _generate_synthetic_wav_bytes,
+    get_voice_service,
+)
 
 
 @pytest.mark.asyncio

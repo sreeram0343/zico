@@ -14,6 +14,7 @@ Covers:
 """
 
 from unittest.mock import MagicMock, patch
+
 import pytest
 
 from app.core.config import settings
@@ -128,6 +129,7 @@ def test_provider_initialization_failure(monkeypatch: pytest.MonkeyPatch):
 def test_import_safety():
     """Test 7 — Importing app.core.llm performs no network operations or completions."""
     import importlib
+
     import app.core.llm
 
     # Re-importing should succeed purely as code loading without invoking any network calls

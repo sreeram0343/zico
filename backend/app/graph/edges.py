@@ -66,12 +66,19 @@ def route_after_router(state: TravelState) -> str:
     raw_intent: Optional[str] = state.get("intent") if isinstance(state, dict) else None
 
     if not raw_intent or not isinstance(raw_intent, str):
-        logger.info("Missing or non-string intent encountered; routing to '%s'", DEFAULT_FALLBACK_NODE)
+        logger.info(
+            "Missing or non-string intent encountered; routing to '%s'", DEFAULT_FALLBACK_NODE
+        )
         return DEFAULT_FALLBACK_NODE
 
     normalized_intent = raw_intent.strip().lower()
 
     target_node = ROUTE_MAP.get(normalized_intent, DEFAULT_FALLBACK_NODE)
-    logger.info("Routing intent '%s' (normalized: '%s') to node '%s'", raw_intent, normalized_intent, target_node)
+    logger.info(
+        "Routing intent '%s' (normalized: '%s') to node '%s'",
+        raw_intent,
+        normalized_intent,
+        target_node,
+    )
 
     return target_node

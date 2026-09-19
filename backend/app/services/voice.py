@@ -2,6 +2,7 @@ import io
 import logging
 import os
 from typing import Optional
+
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -10,6 +11,7 @@ logger = logging.getLogger(__name__)
 def _generate_synthetic_wav_bytes() -> bytes:
     """Generates a minimal valid PCM WAV header byte stream for offline testing."""
     import struct
+
     sample_rate = 16000
     num_samples = 1600
     byte_rate = sample_rate * 2
@@ -62,6 +64,7 @@ class VoiceService:
         ):
             try:
                 from openai import AsyncOpenAI
+
                 client = AsyncOpenAI(api_key=self.openai_api_key, timeout=5.0, max_retries=1)
                 audio_file = io.BytesIO(audio_bytes)
                 audio_file.name = filename
@@ -92,6 +95,7 @@ class VoiceService:
         # Try EdgeTTS first if available
         try:
             import edge_tts
+
             communicate = edge_tts.Communicate(text, voice)
             audio_data = bytearray()
             async for chunk in communicate.stream():
@@ -111,6 +115,7 @@ class VoiceService:
         ):
             try:
                 import httpx
+
                 url = f"https://api.elevenlabs.io/v1/text-to-speech/{self.elevenlabs_voice_id}"
                 headers = {
                     "Accept": "audio/mpeg",

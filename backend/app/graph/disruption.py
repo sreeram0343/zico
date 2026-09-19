@@ -1,7 +1,9 @@
-from datetime import datetime, timedelta
-from typing import Any, Dict, List, Literal, Optional
 import uuid
+from datetime import timedelta
+from typing import List, Literal, Optional
+
 from pydantic import BaseModel, Field
+
 from app.graph.state import (
     ActionStatus,
     ActionType,
@@ -76,7 +78,7 @@ def analyze_disruption(
 
     if event.event_type == "CANCELLATION":
         # All subsequent segments dependent on arrival at this destination are impacted
-        for next_seg in sorted_segments[target_idx + 1:]:
+        for next_seg in sorted_segments[target_idx + 1 :]:
             impacted_ids.append(next_seg.id)
         return DisruptionImpact(
             affected_segment_id=target_seg.id,
@@ -94,7 +96,7 @@ def analyze_disruption(
     transit_types = {SegmentType.FLIGHT, SegmentType.TRANSFER}
 
     current_arrival = delayed_end_time
-    for next_seg in sorted_segments[target_idx + 1:]:
+    for next_seg in sorted_segments[target_idx + 1 :]:
         gap_seconds = (next_seg.start_time - current_arrival).total_seconds()
         gap_minutes = int(gap_seconds / 60)
 

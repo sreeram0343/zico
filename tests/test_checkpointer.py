@@ -1,5 +1,10 @@
 import pytest
-from app.db.checkpointer import _get_postgres_dsn, get_postgres_checkpointer, setup_checkpoint_tables
+
+from app.db.checkpointer import (
+    _get_postgres_dsn,
+    get_postgres_checkpointer,
+    setup_checkpoint_tables,
+)
 
 
 def test_get_postgres_dsn_normalization():

@@ -1,12 +1,12 @@
-import asyncio
 import base64
-from datetime import date, datetime
-from enum import Enum
 import json
 import logging
 import sys
 import traceback
-from typing import Any, Dict, List, Optional
+from datetime import date, datetime
+from enum import Enum
+from typing import Any, Dict
+
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.types import Command
@@ -93,11 +93,14 @@ async def websocket_stream_endpoint(websocket: WebSocket, trip_id: str):
                 payload = json.loads(raw_data)
             except Exception as json_err:
                 print(f"[WS ERROR] JSON parse error: {json_err}", flush=True)
-                await _safe_send_json(websocket, {
-                    "type": "error",
-                    "message": f"Invalid JSON payload: {str(json_err)}",
-                    "content": f"Invalid JSON payload: {str(json_err)}",
-                })
+                await _safe_send_json(
+                    websocket,
+                    {
+                        "type": "error",
+                        "message": f"Invalid JSON payload: {str(json_err)}",
+                        "content": f"Invalid JSON payload: {str(json_err)}",
+                    },
+                )
                 continue
 
             # 3. Process the incoming request in an isolated try/except block
@@ -122,20 +125,30 @@ async def websocket_stream_endpoint(websocket: WebSocket, trip_id: str):
                         try:
                             audio_bytes = base64.b64decode(audio_b64)
                             transcript = await voice_service.transcribe_audio(audio_bytes)
-                            await _safe_send_json(websocket, {
-                                "type": "transcript",
-                                "text": transcript,
-                                "content": transcript,
-                            })
+                            await _safe_send_json(
+                                websocket,
+                                {
+                                    "type": "transcript",
+                                    "text": transcript,
+                                    "content": transcript,
+                                },
+                            )
                             input_query = transcript
                         except Exception as exc:
-                            print(f"[WS ERROR] Voice transcription error: {exc}", file=sys.stderr, flush=True)
+                            print(
+                                f"[WS ERROR] Voice transcription error: {exc}",
+                                file=sys.stderr,
+                                flush=True,
+                            )
                             logger.error(f"Voice transcription failed: {exc}")
-                            await _safe_send_json(websocket, {
-                                "type": "error",
-                                "message": f"Speech transcription error: {str(exc)}",
-                                "content": f"Speech transcription error: {str(exc)}",
-                            })
+                            await _safe_send_json(
+                                websocket,
+                                {
+                                    "type": "error",
+                                    "message": f"Speech transcription error: {str(exc)}",
+                                    "content": f"Speech transcription error: {str(exc)}",
+                                },
+                            )
                             continue
                     else:
                         input_query = user_content
@@ -176,13 +189,16 @@ async def websocket_stream_endpoint(websocket: WebSocket, trip_id: str):
                 print(f"[WS GRAPH] Starting stream for query: {input_query!r}", flush=True)
 
                 # Send initial status feedback
-                await _safe_send_json(websocket, {
-                    "type": "status",
-                    "status": "processing",
-                    "node": "input_node",
-                    "content": "Thinking...",
-                    "message": f"Orchestrating request: '{input_query}'",
-                })
+                await _safe_send_json(
+                    websocket,
+                    {
+                        "type": "status",
+                        "status": "processing",
+                        "node": "input_node",
+                        "content": "Thinking...",
+                        "message": f"Orchestrating request: '{input_query}'",
+                    },
+                )
 
                 # ---------------------------------------------------------
                 # Execute LangGraph Streaming via astream_events(..., version="v2")
@@ -205,21 +221,27 @@ async def websocket_stream_endpoint(websocket: WebSocket, trip_id: str):
                     if event_type == "on_chain_start":
                         node_candidate = langgraph_node or event_name
                         if node_candidate in KNOWN_GRAPH_NODES or langgraph_node:
-                            await _safe_send_json(websocket, {
-                                "type": "status",
-                                "node": node_candidate,
-                                "content": "Thinking...",
-                                "message": "Thinking...",
-                            })
+                            await _safe_send_json(
+                                websocket,
+                                {
+                                    "type": "status",
+                                    "node": node_candidate,
+                                    "content": "Thinking...",
+                                    "message": "Thinking...",
+                                },
+                            )
 
                     # 2. Tool Invocation -> emit "tool_call" frame
                     elif event_type == "on_tool_start":
                         tool_input = event_data.get("input", event_data)
-                        await _safe_send_json(websocket, {
-                            "type": "tool_call",
-                            "tool": event_name,
-                            "input": _safe_serialize(tool_input),
-                        })
+                        await _safe_send_json(
+                            websocket,
+                            {
+                                "type": "tool_call",
+                                "tool": event_name,
+                                "input": _safe_serialize(tool_input),
+                            },
+                        )
 
                     # 3. Chat Model Token Stream -> emit "token" frame
                     elif event_type == "on_chat_model_stream":
@@ -239,10 +261,13 @@ async def websocket_stream_endpoint(websocket: WebSocket, trip_id: str):
 
                         if chunk_text:
                             accumulated_ai_text += chunk_text
-                            await _safe_send_json(websocket, {
-                                "type": "token",
-                                "content": chunk_text,
-                            })
+                            await _safe_send_json(
+                                websocket,
+                                {
+                                    "type": "token",
+                                    "content": chunk_text,
+                                },
+                            )
 
                     # 4. Node End / Chain End -> check state mutation & emit "state_update"
                     elif event_type == "on_chain_end":
@@ -258,34 +283,51 @@ async def websocket_stream_endpoint(websocket: WebSocket, trip_id: str):
                                 # Push state_update on itinerary change or completion
                                 if len(itinerary) != last_streamed_itinerary_count or itinerary:
                                     last_streamed_itinerary_count = len(itinerary)
-                                    await _safe_send_json(websocket, {
-                                        "type": "state_update",
-                                        "itinerary": serialized_itinerary,
-                                    })
+                                    await _safe_send_json(
+                                        websocket,
+                                        {
+                                            "type": "state_update",
+                                            "itinerary": serialized_itinerary,
+                                        },
+                                    )
 
                                 # Extract message content from node output if any
                                 node_output = event_data.get("output", {})
                                 msg_snippet = ""
                                 if isinstance(node_output, dict) and "messages" in node_output:
                                     for m in node_output["messages"]:
-                                        if isinstance(m, AIMessage) or getattr(m, "type", "") == "ai":
-                                            msg_snippet = m.content if isinstance(m.content, str) else str(m.content)
+                                        if (
+                                            isinstance(m, AIMessage)
+                                            or getattr(m, "type", "") == "ai"
+                                        ):
+                                            msg_snippet = (
+                                                m.content
+                                                if isinstance(m.content, str)
+                                                else str(m.content)
+                                            )
 
                                 # Also emit node_update for legacy UI/test compatibility
-                                await _safe_send_json(websocket, {
-                                    "type": "node_update",
-                                    "node": node_candidate,
-                                    "output": _safe_serialize(node_output),
-                                    "content": msg_snippet or "Node completed",
-                                    "message": msg_snippet or "Node completed",
-                                })
+                                await _safe_send_json(
+                                    websocket,
+                                    {
+                                        "type": "node_update",
+                                        "node": node_candidate,
+                                        "output": _safe_serialize(node_output),
+                                        "content": msg_snippet or "Node completed",
+                                        "message": msg_snippet or "Node completed",
+                                    },
+                                )
                             except Exception as state_exc:
                                 logger.debug(f"Notice getting state in on_chain_end: {state_exc}")
 
                 # Check if graph paused on dynamic interrupt
                 try:
                     current_state = graph_engine.get_state(thread_config)
-                    if current_state and current_state.tasks and any(len(t.interrupts) > 0 for t in current_state.tasks):
+                    if (
+                        current_state
+                        and current_state.tasks
+                        and any(len(t.interrupts) > 0 for t in current_state.tasks)
+                    ):
                         for task in current_state.tasks:
                             for inter in task.interrupts:
                                 prompt_msg = (
@@ -293,13 +335,16 @@ async def websocket_stream_endpoint(websocket: WebSocket, trip_id: str):
                                     if isinstance(inter.value, dict)
                                     else "Approval required"
                                 )
-                                await _safe_send_json(websocket, {
-                                    "type": "interrupt",
-                                    "node": task.name,
-                                    "interrupt_value": _safe_serialize(inter.value),
-                                    "prompt": prompt_msg,
-                                    "content": prompt_msg,
-                                })
+                                await _safe_send_json(
+                                    websocket,
+                                    {
+                                        "type": "interrupt",
+                                        "node": task.name,
+                                        "interrupt_value": _safe_serialize(inter.value),
+                                        "prompt": prompt_msg,
+                                        "content": prompt_msg,
+                                    },
+                                )
                 except Exception as interrupt_exc:
                     logger.debug(f"Notice inspecting graph interrupts: {interrupt_exc}")
 
@@ -308,47 +353,70 @@ async def websocket_stream_endpoint(websocket: WebSocket, trip_id: str):
                     try:
                         audio_bytes = await voice_service.synthesize_speech(accumulated_ai_text)
                         audio_b64 = base64.b64encode(audio_bytes).decode("utf-8")
-                        await _safe_send_json(websocket, {
-                            "type": "voice_chunk",
-                            "audio_base64": audio_b64,
-                        })
+                        await _safe_send_json(
+                            websocket,
+                            {
+                                "type": "voice_chunk",
+                                "audio_base64": audio_b64,
+                            },
+                        )
                     except Exception as tts_exc:
                         logger.debug(f"TTS streaming notice: {tts_exc}")
 
                 # Signal turn completion
-                await _safe_send_json(websocket, {
-                    "type": "turn_complete",
-                    "trip_id": active_trip_id,
-                })
+                await _safe_send_json(
+                    websocket,
+                    {
+                        "type": "turn_complete",
+                        "trip_id": active_trip_id,
+                    },
+                )
                 print(f"[WS SUCCESS] Completed stream turn for trip: {active_trip_id}", flush=True)
 
             except WebSocketDisconnect:
-                print(f"[WS DISCONNECT] Client disconnected mid-stream for trip: {trip_id}", flush=True)
+                print(
+                    f"[WS DISCONNECT] Client disconnected mid-stream for trip: {trip_id}",
+                    flush=True,
+                )
                 break
             except Exception as loop_err:
-                print(f"[WS ERROR] Error in stream processing: {loop_err}", file=sys.stderr, flush=True)
+                print(
+                    f"[WS ERROR] Error in stream processing: {loop_err}",
+                    file=sys.stderr,
+                    flush=True,
+                )
                 traceback.print_exc()
                 logger.error(f"Error during graph execution stream: {loop_err}", exc_info=True)
                 try:
-                    await _safe_send_json(websocket, {
-                        "type": "error",
-                        "message": str(loop_err),
-                        "content": str(loop_err),
-                    })
+                    await _safe_send_json(
+                        websocket,
+                        {
+                            "type": "error",
+                            "message": str(loop_err),
+                            "content": str(loop_err),
+                        },
+                    )
                 except Exception:
                     pass
 
     except WebSocketDisconnect:
         print(f"[WS CLOSED] Connection closed cleanly for trip: {trip_id}", flush=True)
     except Exception as global_err:
-        print(f"[WS FATAL] Global WebSocket handler exception: {global_err}", file=sys.stderr, flush=True)
+        print(
+            f"[WS FATAL] Global WebSocket handler exception: {global_err}",
+            file=sys.stderr,
+            flush=True,
+        )
         traceback.print_exc()
         logger.error(f"Global WebSocket handler exception: {global_err}", exc_info=True)
         try:
-            await _safe_send_json(websocket, {
-                "type": "error",
-                "message": str(global_err),
-                "content": str(global_err),
-            })
+            await _safe_send_json(
+                websocket,
+                {
+                    "type": "error",
+                    "message": str(global_err),
+                    "content": str(global_err),
+                },
+            )
         except Exception:
             pass

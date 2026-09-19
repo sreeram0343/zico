@@ -280,7 +280,9 @@ class ResearchAgent:
         cleaned_user_query = user_query.strip()
 
         # 3. Determine whether to use LLM query construction
-        should_use_llm = (self.use_llm is True) or (self.use_llm is None and self._model is not None)
+        should_use_llm = (self.use_llm is True) or (
+            self.use_llm is None and self._model is not None
+        )
 
         if should_use_llm:
             llm_query = self._generate_llm_query(cleaned_user_query, state)
@@ -337,9 +339,8 @@ class ResearchAgent:
                 "research_status": "error",
                 "active_agent": "research_agent",
                 "completed_agents": completed_agents,
-                "errors": current_errors + [
-                    f"Research Agent invoked with invalid intent '{intent}'. Expected 'research'."
-                ],
+                "errors": current_errors
+                + [f"Research Agent invoked with invalid intent '{intent}'. Expected 'research'."],
             }
 
         logger.info("Research Agent executing research workflow")
@@ -368,7 +369,11 @@ class ResearchAgent:
             manage_client = True
 
         try:
-            logger.info("Executing Tavily search (query=%r, max_results=%d)", search_query, DEFAULT_MAX_RESULTS)
+            logger.info(
+                "Executing Tavily search (query=%r, max_results=%d)",
+                search_query,
+                DEFAULT_MAX_RESULTS,
+            )
             response: TavilySearchResponse = await client.search(
                 query=search_query,
                 max_results=DEFAULT_MAX_RESULTS,
@@ -403,7 +408,9 @@ class ResearchAgent:
         deduped_results = self._deduplicate_results(response.results)
         status = "success" if deduped_results else "no_results"
 
-        logger.info("Research Agent lookup completed (results=%d, status=%s)", len(deduped_results), status)
+        logger.info(
+            "Research Agent lookup completed (results=%d, status=%s)", len(deduped_results), status
+        )
 
         return {
             "research_query": search_query,

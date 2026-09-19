@@ -1,8 +1,9 @@
 from datetime import datetime, timedelta
+
 import pytest
+
 from app.graph.disruption import (
     DisruptionEvent,
-    DisruptionImpact,
     analyze_disruption,
     apply_recovery_action,
     create_recovery_action,

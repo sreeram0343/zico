@@ -1,6 +1,8 @@
 from typing import Any, Dict, List, Optional
+
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
+
 from app.rag.service import PolicyDocument, get_rag_service
 
 router = APIRouter()

@@ -1,9 +1,9 @@
+import uuid
 from datetime import datetime, timedelta, timezone
-
 from enum import Enum
 from typing import Any, Dict, List, Literal, Optional
-import uuid
-from langchain_core.messages import AIMessage, HumanMessage
+
+from langchain_core.messages import AIMessage
 from pydantic import BaseModel, Field
 
 from app.graph.state import (
@@ -168,7 +168,9 @@ def disruption_reasoning_worker(
 
     if not itinerary:
         return {
-            "messages": [AIMessage(content="No active itinerary segments found to analyze for disruptions.")],
+            "messages": [
+                AIMessage(content="No active itinerary segments found to analyze for disruptions.")
+            ],
             "active_disruptions": active_disruptions,
             "pending_actions": pending_actions,
         }

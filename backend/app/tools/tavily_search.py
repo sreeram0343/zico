@@ -15,7 +15,6 @@ Security:
 
 from __future__ import annotations
 
-import logging
 from typing import Any, Dict, List, Optional
 
 import httpx
@@ -241,7 +240,9 @@ class TavilySearchClient:
             )
         except httpx.TimeoutException as exc:
             logger.warning("Tavily request timed out after %ss", self.timeout)
-            raise TavilyTimeoutError(f"Tavily search request timed out after {self.timeout}s") from exc
+            raise TavilyTimeoutError(
+                f"Tavily search request timed out after {self.timeout}s"
+            ) from exc
         except httpx.RequestError as exc:
             logger.error("Tavily network failure: %s", exc)
             raise TavilyNetworkError(f"Network failure communicating with Tavily: {exc}") from exc
@@ -252,7 +253,9 @@ class TavilySearchClient:
             try:
                 err_json = response.json()
                 if isinstance(err_json, dict):
-                    detail = err_json.get("detail") or err_json.get("error") or err_json.get("message")
+                    detail = (
+                        err_json.get("detail") or err_json.get("error") or err_json.get("message")
+                    )
                     if isinstance(detail, dict):
                         error_detail = detail.get("error") or detail.get("message") or str(detail)
                     elif detail:
@@ -300,7 +303,9 @@ class TavilySearchClient:
             if raw_url is not None and not isinstance(raw_url, str):
                 raise TavilyParsingError(f"Invalid URL type in result: {type(raw_url).__name__}")
             if raw_title is not None and not isinstance(raw_title, str):
-                raise TavilyParsingError(f"Invalid title type in result: {type(raw_title).__name__}")
+                raise TavilyParsingError(
+                    f"Invalid title type in result: {type(raw_title).__name__}"
+                )
 
             score_val = item.get("score")
             normalized_score = float(score_val) if isinstance(score_val, (int, float)) else None
@@ -311,12 +316,17 @@ class TavilySearchClient:
                     url=raw_url or "",
                     content=raw_content if isinstance(raw_content, str) else "",
                     score=normalized_score,
-                    published_date=item.get("published_date") if isinstance(item.get("published_date"), str) else None,
-                    raw_content=item.get("raw_content") if isinstance(item.get("raw_content"), str) else None,
+                    published_date=item.get("published_date")
+                    if isinstance(item.get("published_date"), str)
+                    else None,
+                    raw_content=item.get("raw_content")
+                    if isinstance(item.get("raw_content"), str)
+                    else None,
                     metadata={
                         k: v
                         for k, v in item.items()
-                        if k not in {"title", "url", "content", "score", "published_date", "raw_content"}
+                        if k
+                        not in {"title", "url", "content", "score", "published_date", "raw_content"}
                     },
                 )
             )
@@ -332,5 +342,7 @@ class TavilySearchClient:
             count=len(normalized_results),
             results=normalized_results,
             answer=data.get("answer") if isinstance(data.get("answer"), str) else None,
-            response_time=data.get("response_time") if isinstance(data.get("response_time"), (int, float)) else None,
+            response_time=data.get("response_time")
+            if isinstance(data.get("response_time"), (int, float))
+            else None,
         )

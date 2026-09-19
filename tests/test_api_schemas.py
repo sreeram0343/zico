@@ -35,7 +35,7 @@ import re
 from typing import Any, Dict
 
 import pytest
-from pydantic import HttpUrl, ValidationError
+from pydantic import ValidationError
 
 from app.api.schemas import (
     MAX_MESSAGE_LENGTH,
@@ -47,7 +47,6 @@ from app.api.schemas import (
     TravelRequest,
     TravelResponse,
 )
-
 
 # ---------------------------------------------------------------------------
 # Test 34: Valid TravelRequest
@@ -177,10 +176,12 @@ def test_travel_request_omitted_session_id() -> None:
 def test_travel_request_unknown_fields_rejected() -> None:
     """Verify unexpected fields trigger validation failure via extra='forbid'."""
     with pytest.raises(ValidationError) as exc_info:
-        TravelRequest.model_validate({
-            "message": "Find a flight.",
-            "unknown_field": "unexpected_payload",
-        })
+        TravelRequest.model_validate(
+            {
+                "message": "Find a flight.",
+                "unknown_field": "unexpected_payload",
+            }
+        )
     assert "extra_forbidden" in str(exc_info.value) or "unknown_field" in str(exc_info.value)
 
 
@@ -275,7 +276,9 @@ def test_source_model_score_optional() -> None:
     assert source.score is None
 
 
-@pytest.mark.parametrize("invalid_url", ["not-a-url", "ftp://unsupported", "htp:/typo", "http://", ""])
+@pytest.mark.parametrize(
+    "invalid_url", ["not-a-url", "ftp://unsupported", "htp:/typo", "http://", ""]
+)
 def test_source_model_malformed_url_rejected(invalid_url: str) -> None:
     """Verify syntactically invalid URLs raise ValidationError without network calls."""
     with pytest.raises(ValidationError) as exc_info:
@@ -311,11 +314,13 @@ def test_source_serialization() -> None:
 def test_source_rejects_raw_provider_fields() -> None:
     """Verify extra raw provider fields (e.g. Tavily content) are rejected."""
     with pytest.raises(ValidationError) as exc_info:
-        Source.model_validate({
-            "title": "Search Result",
-            "url": "https://example.com",
-            "raw_provider_content": "unfiltered text",
-        })
+        Source.model_validate(
+            {
+                "title": "Search Result",
+                "url": "https://example.com",
+                "raw_provider_content": "unfiltered text",
+            }
+        )
     assert "extra_forbidden" in str(exc_info.value) or "raw_provider_content" in str(exc_info.value)
 
 

@@ -1,12 +1,14 @@
 import uuid
 from datetime import datetime
 from typing import Any, Dict, List, Optional
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, JSON, String, func
+
+from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, String, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
 class Base(DeclarativeBase):
     """Base declarative class for all SQLAlchemy ORM models."""
+
     pass
 
 

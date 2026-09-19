@@ -154,45 +154,36 @@ def create_initial_state(
         "user_query": user_query,
         "session_id": session_id,
         "request_id": request_id,
-
         # Intent
         "intent": None,
         "intent_confidence": None,
-
         # Travel Parameters
         "origin": None,
         "destination": None,
         "departure_date": None,
         "return_date": None,
         "passengers": None,
-
         # Flight Operations
         "flight_query": None,
         "flight_results": [],
         "flight_status": "not_requested",
-
         # Research Operations
         "research_query": None,
         "research_results": [],
         "research_status": "not_requested",
-
         # Agent Execution
         "active_agent": None,
         "completed_agents": [],
         "agent_messages": [],
-
         # Validation
         "validation_status": "pending",
         "validation_errors": [],
-
         # Final Response
         "final_response": None,
         "sources": [],
-
         # Workflow Status & Errors
         "workflow_status": "initialized",
         "errors": [],
-
         # Extensible Metadata (Isolated copy)
         "metadata": dict(metadata) if metadata is not None else {},
     }

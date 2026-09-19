@@ -1,7 +1,9 @@
 import asyncio
 from typing import Any, Dict
+
 from fastapi import APIRouter
 from sqlalchemy import text
+
 from app.db.redis import get_redis
 from app.db.session import engine
 from app.rag.service import get_rag_service
@@ -43,7 +45,9 @@ async def health_check() -> Dict[str, Any]:
         qdrant_status = f"unavailable: {str(exc)}"
 
     return {
-        "status": "healthy" if db_status == "healthy" and redis_status == "healthy" and qdrant_status == "healthy" else "degraded",
+        "status": "healthy"
+        if db_status == "healthy" and redis_status == "healthy" and qdrant_status == "healthy"
+        else "degraded",
         "service": "zico-backend",
         "components": {
             "database": db_status,
@@ -51,4 +55,3 @@ async def health_check() -> Dict[str, Any]:
             "qdrant": qdrant_status,
         },
     }
-

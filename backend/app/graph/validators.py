@@ -1,5 +1,7 @@
 from typing import List, Optional
+
 from pydantic import BaseModel, Field
+
 from app.graph.state import SegmentType, TripConstraints, TripSegment
 
 
@@ -51,9 +53,7 @@ def detect_itinerary_conflicts(
             gap_seconds = (seg_b.start_time - seg_a.end_time).total_seconds()
             gap_minutes = int(gap_seconds / 60)
             if gap_minutes < constraints.min_connection_buffer_minutes:
-                deficit_minutes = (
-                    constraints.min_connection_buffer_minutes - gap_minutes
-                )
+                deficit_minutes = constraints.min_connection_buffer_minutes - gap_minutes
                 conflicts.append(
                     ItineraryConflict(
                         segment_a_id=seg_a.id,

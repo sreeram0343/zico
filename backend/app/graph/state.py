@@ -1,12 +1,12 @@
 from __future__ import annotations
+
 from datetime import datetime, timezone
 from enum import Enum
-import re
 from typing import Annotated, Any, Dict, List, Literal, Optional, Sequence, Tuple
-from pydantic import BaseModel, Field, field_validator, model_validator
+
 from langchain_core.messages import BaseMessage
 from langgraph.graph.message import add_messages
-
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 # ---------------------------------------------------------------------------
 # Enums & Value Objects
@@ -59,9 +59,15 @@ class ActionStatus(str, Enum):
 
 class Location(BaseModel):
     name: str = Field(..., description="Location or airport display name.")
-    iata_code: Optional[str] = Field(default=None, description="Standard 3-letter IATA airport code if applicable.")
-    lat: Optional[float] = Field(default=None, ge=-90.0, le=90.0, description="Geographic latitude in degrees.")
-    lng: Optional[float] = Field(default=None, ge=-180.0, le=180.0, description="Geographic longitude in degrees.")
+    iata_code: Optional[str] = Field(
+        default=None, description="Standard 3-letter IATA airport code if applicable."
+    )
+    lat: Optional[float] = Field(
+        default=None, ge=-90.0, le=90.0, description="Geographic latitude in degrees."
+    )
+    lng: Optional[float] = Field(
+        default=None, ge=-180.0, le=180.0, description="Geographic longitude in degrees."
+    )
 
     @field_validator("iata_code", mode="before")
     @classmethod
@@ -80,7 +86,9 @@ class Location(BaseModel):
 class UserPreferences(BaseModel):
     """Traveler preferences governing flight, hotel, and itinerary synthesis."""
 
-    preferred_airlines: List[str] = Field(default_factory=list, description="Airlines preferred by traveler.")
+    preferred_airlines: List[str] = Field(
+        default_factory=list, description="Airlines preferred by traveler."
+    )
     preferred_cabin_class: Literal["ECONOMY", "PREMIUM_ECONOMY", "BUSINESS", "FIRST"] = Field(
         default="ECONOMY",
         description="Default seating cabin class tier.",
@@ -113,8 +121,12 @@ class UserPreferences(BaseModel):
         default_factory=dict,
         description="Mapping of airline/hotel brand to traveler membership number.",
     )
-    currency: str = Field(default="USD", min_length=3, max_length=3, description="Preferred 3-letter currency code.")
-    home_airport: Optional[str] = Field(default=None, description="Primary home/origin airport IATA code.")
+    currency: str = Field(
+        default="USD", min_length=3, max_length=3, description="Preferred 3-letter currency code."
+    )
+    home_airport: Optional[str] = Field(
+        default=None, description="Primary home/origin airport IATA code."
+    )
 
     @field_validator("currency", mode="before")
     @classmethod
@@ -154,14 +166,24 @@ class TripSegment(BaseModel):
 
     id: str = Field(..., min_length=1, description="Unique identifier for the segment.")
     type: SegmentType = Field(..., description="Category of travel segment.")
-    title: str = Field(..., min_length=1, description="Human-readable title (e.g. flight number or hotel name).")
+    title: str = Field(
+        ..., min_length=1, description="Human-readable title (e.g. flight number or hotel name)."
+    )
     start_time: datetime = Field(..., description="Departure, check-in, or commencement datetime.")
     end_time: datetime = Field(..., description="Arrival, check-out, or conclusion datetime.")
-    location: Location = Field(..., description="Primary geographic destination or arrival location.")
+    location: Location = Field(
+        ..., description="Primary geographic destination or arrival location."
+    )
     cost: float = Field(default=0.0, ge=0.0, description="Total monetary cost for this segment.")
-    currency: str = Field(default="USD", min_length=3, max_length=3, description="3-letter currency code.")
-    metadata: Dict[str, Any] = Field(default_factory=dict, description="Arbitrary domain-specific metadata.")
-    is_confirmed: bool = Field(default=False, description="Whether booking/reservation is fully confirmed.")
+    currency: str = Field(
+        default="USD", min_length=3, max_length=3, description="3-letter currency code."
+    )
+    metadata: Dict[str, Any] = Field(
+        default_factory=dict, description="Arbitrary domain-specific metadata."
+    )
+    is_confirmed: bool = Field(
+        default=False, description="Whether booking/reservation is fully confirmed."
+    )
 
     @field_validator("id", "title", mode="before")
     @classmethod
@@ -203,10 +225,18 @@ class TripSegment(BaseModel):
 
 
 class TripConstraints(BaseModel):
-    max_budget: Optional[float] = Field(default=None, ge=0.0, description="Upper bound budget for journey.")
-    min_connection_buffer_minutes: int = Field(default=90, ge=0, description="Minimum layover buffer minutes.")
-    required_arrival_by: Optional[datetime] = Field(default=None, description="Hard deadline for final arrival.")
-    strict_dietary: List[str] = Field(default_factory=list, description="Strict dietary constraints.")
+    max_budget: Optional[float] = Field(
+        default=None, ge=0.0, description="Upper bound budget for journey."
+    )
+    min_connection_buffer_minutes: int = Field(
+        default=90, ge=0, description="Minimum layover buffer minutes."
+    )
+    required_arrival_by: Optional[datetime] = Field(
+        default=None, description="Hard deadline for final arrival."
+    )
+    strict_dietary: List[str] = Field(
+        default_factory=list, description="Strict dietary constraints."
+    )
 
 
 class PendingAction(BaseModel):
@@ -231,15 +261,27 @@ class TripState(BaseModel):
 
     trip_id: str = Field(..., min_length=1, description="Unique primary identifier for the trip.")
     user_id: str = Field(..., min_length=1, description="Owner user identifier.")
-    title: Optional[str] = Field(default="Untitled Journey", description="Display name for the trip.")
-    itinerary: List[TripSegment] = Field(default_factory=list, description="Chronological sequence of trip segments.")
-    preferences: UserPreferences = Field(default_factory=UserPreferences, description="Traveler preferences.")
-    constraints: TripConstraints = Field(default_factory=TripConstraints, description="Operational constraints.")
-    status: Literal["PLANNING", "CONFIRMED", "IN_PROGRESS", "COMPLETED", "CANCELLED", "DISRUPTED"] = Field(
+    title: Optional[str] = Field(
+        default="Untitled Journey", description="Display name for the trip."
+    )
+    itinerary: List[TripSegment] = Field(
+        default_factory=list, description="Chronological sequence of trip segments."
+    )
+    preferences: UserPreferences = Field(
+        default_factory=UserPreferences, description="Traveler preferences."
+    )
+    constraints: TripConstraints = Field(
+        default_factory=TripConstraints, description="Operational constraints."
+    )
+    status: Literal[
+        "PLANNING", "CONFIRMED", "IN_PROGRESS", "COMPLETED", "CANCELLED", "DISRUPTED"
+    ] = Field(
         default="PLANNING",
         description="Lifecycle status of journey.",
     )
-    total_cost: float = Field(default=0.0, ge=0.0, description="Aggregated cost across all segments.")
+    total_cost: float = Field(
+        default=0.0, ge=0.0, description="Aggregated cost across all segments."
+    )
     currency: str = Field(default="USD", min_length=3, max_length=3)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
@@ -311,9 +353,7 @@ class TripState(BaseModel):
 class ZicoGraphState(BaseModel):
     """The central state flowing across all nodes in the orchestrator graph."""
 
-    messages: Annotated[Sequence[BaseMessage], add_messages] = Field(
-        default_factory=list
-    )
+    messages: Annotated[Sequence[BaseMessage], add_messages] = Field(default_factory=list)
     trip_id: str
     user_id: str
     itinerary: List[TripSegment] = Field(default_factory=list)

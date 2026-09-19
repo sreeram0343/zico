@@ -1,4 +1,5 @@
-import pytest
+from qdrant_client import QdrantClient
+
 from app.rag.service import (
     DEFAULT_POLICIES,
     PolicyDocument,
@@ -6,7 +7,6 @@ from app.rag.service import (
     _compute_deterministic_embedding,
     get_rag_service,
 )
-from qdrant_client import QdrantClient
 
 
 def test_compute_deterministic_embedding():

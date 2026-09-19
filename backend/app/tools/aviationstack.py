@@ -284,7 +284,9 @@ class AviationStackClient:
         Raises:
             AviationStackConfigError: If the API key is absent or empty.
         """
-        resolved_key = api_key if api_key is not None else getattr(settings, "AVIATIONSTACK_API_KEY", "")
+        resolved_key = (
+            api_key if api_key is not None else getattr(settings, "AVIATIONSTACK_API_KEY", "")
+        )
         if not resolved_key or not isinstance(resolved_key, str) or not resolved_key.strip():
             raise AviationStackConfigError(
                 "AviationStack API key is missing or empty. Please configure AVIATIONSTACK_API_KEY."
@@ -451,7 +453,10 @@ class AviationStackClient:
         if not normalized_flights:
             logger.info("AviationStack returned 0 matching flight records")
         else:
-            logger.info("AviationStack flight lookup completed successfully (results=%d)", len(normalized_flights))
+            logger.info(
+                "AviationStack flight lookup completed successfully (results=%d)",
+                len(normalized_flights),
+            )
 
         return AviationStackResponse(
             success=True,

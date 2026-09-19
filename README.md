@@ -120,14 +120,24 @@ graph TD
 
 ---
 
-## Running Automated Tests
+## Development & Code Quality
 
-Run the complete 48-test test suite across state models, workers, validators, disruption engine, policy RAG, voice pipeline, and REST API:
+Run tests, linting, and formatting checks from the repository root:
 
 ```bash
-# From repository root
+# Run tests
 pytest -v
+
+# Run lint checks
+ruff check backend/app tests
+
+# Check code formatting
+ruff format --check backend/app tests
+
+# Format code
+ruff format backend/app tests
 ```
+
 
 ---
 

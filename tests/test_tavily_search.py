@@ -22,13 +22,13 @@ Covers:
 
 import json
 from typing import Any, Dict
+
 import httpx
 import pytest
 
 from app.core.config import settings
 from app.tools.tavily_search import (
     ResearchResult,
-    TavilyAPIError,
     TavilyConfigError,
     TavilyHTTPError,
     TavilyNetworkError,
@@ -241,6 +241,7 @@ async def test_http_error_handling(status_code: int):
 
 async def test_malformed_provider_response():
     """Test 38: Malformed response structures raise TavilyParsingError."""
+
     # Missing 'results' key
     def handler_missing(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json={"query": "test"})
@@ -319,7 +320,9 @@ async def test_secret_protection(caplog: pytest.LogCaptureFixture):
         return httpx.Response(500, text="Internal Server Error")
 
     with caplog.at_level("DEBUG"):
-        async with TavilySearchClient(api_key=secret_key, transport=httpx.MockTransport(handler)) as client:
+        async with TavilySearchClient(
+            api_key=secret_key, transport=httpx.MockTransport(handler)
+        ) as client:
             with pytest.raises(TavilyHTTPError) as exc_info:
                 await client.search(query="test secret")
 

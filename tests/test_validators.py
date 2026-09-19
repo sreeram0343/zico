@@ -3,10 +3,11 @@ Unit tests for deterministic itinerary validation engine.
 """
 
 from datetime import datetime, timedelta
+
 import pytest
+
 from app.graph.state import Location, SegmentType, TripConstraints, TripSegment
 from app.graph.validators import (
-    ItineraryConflict,
     detect_itinerary_conflicts,
     validate_budget_cap,
 )

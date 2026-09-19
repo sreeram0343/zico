@@ -18,38 +18,31 @@ Testing Philosophy & Boundary Isolation:
 from __future__ import annotations
 
 import asyncio
-import re
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
 from httpx import ASGITransport, AsyncClient
-from langchain_core.messages import AIMessage
 
+from app.agents.flight_agent import run_flight_agent as real_run_flight_agent
+from app.agents.research_agent import run_research_agent as real_run_research_agent
+from app.agents.response_agent import run_response_agent as real_run_response_agent
 from app.agents.router_agent import RouterDecision
+from app.agents.router_agent import aroute_request as real_aroute_request
+from app.agents.validator_agent import run_validator_agent as real_run_validator_agent
 from app.api.schemas import (
-    APIError,
-    APIErrorCode,
     ResponseStatus,
-    Source,
-    TravelRequest,
     TravelResponse,
 )
 from app.core.config import settings
 from app.core.state import TravelState
-from app.agents.flight_agent import run_flight_agent as real_run_flight_agent
-from app.agents.research_agent import run_research_agent as real_run_research_agent
-from app.agents.response_agent import run_response_agent as real_run_response_agent
-from app.agents.router_agent import aroute_request as real_aroute_request
-from app.agents.validator_agent import run_validator_agent as real_run_validator_agent
 from app.main import app
 from app.tools.aviationstack import (
     AirlineDetails,
     AirportDetails,
     AviationStackAPIError,
     AviationStackResponse,
-    AviationStackTimeoutError,
     FlightDetails,
     NormalizedFlight,
     PaginationInfo,
@@ -58,7 +51,6 @@ from app.tools.tavily_search import (
     ResearchResult,
     TavilyHTTPError,
     TavilySearchResponse,
-    TavilyTimeoutError,
 )
 
 FAKE_OPENAI_KEY = "test-secret-openai-key-999"
@@ -116,8 +108,14 @@ def build_sample_flight(
         arrival_actual=None,
         flight=FlightDetails(number=flight_number, iata=flight_iata, icao=f"UAE{flight_number}"),
         airline=AirlineDetails(name=airline_name, iata="EK", icao="UAE"),
-        departure=AirportDetails(airport="Dubai International Airport", iata=dep_iata, scheduled="2026-09-20T10:00:00Z"),
-        arrival=AirportDetails(airport="Trivandrum International Airport", iata=arr_iata, scheduled="2026-09-20T15:30:00Z"),
+        departure=AirportDetails(
+            airport="Dubai International Airport", iata=dep_iata, scheduled="2026-09-20T10:00:00Z"
+        ),
+        arrival=AirportDetails(
+            airport="Trivandrum International Airport",
+            iata=arr_iata,
+            scheduled="2026-09-20T15:30:00Z",
+        ),
     )
 
 
@@ -150,7 +148,9 @@ def build_sample_research_results() -> List[ResearchResult]:
     ]
 
 
-def build_tavily_response(results: List[ResearchResult], query: str = "visa requirements germany") -> TavilySearchResponse:
+def build_tavily_response(
+    results: List[ResearchResult], query: str = "visa requirements germany"
+) -> TavilySearchResponse:
     """Construct a TavilySearchResponse envelope."""
     return TavilySearchResponse(
         success=True,
@@ -164,8 +164,12 @@ def build_tavily_response(results: List[ResearchResult], query: str = "visa requ
 def create_mock_router_model(intent: str, confidence: float = 1.0) -> MagicMock:
     """Return a mock LLM chat model configured for router structured decision output."""
     mock_runnable = MagicMock()
-    mock_runnable.ainvoke = AsyncMock(return_value=RouterDecision(intent=intent, confidence=confidence))
-    mock_runnable.invoke = MagicMock(return_value=RouterDecision(intent=intent, confidence=confidence))
+    mock_runnable.ainvoke = AsyncMock(
+        return_value=RouterDecision(intent=intent, confidence=confidence)
+    )
+    mock_runnable.invoke = MagicMock(
+        return_value=RouterDecision(intent=intent, confidence=confidence)
+    )
 
     mock_chat_model = MagicMock()
     mock_chat_model.with_structured_output = MagicMock(return_value=mock_runnable)
@@ -197,7 +201,9 @@ def test_flight_request_end_to_end(client: TestClient) -> None:
     aviation_envelope = build_aviation_response([sample_flight])
 
     mock_router_model = create_mock_router_model("flight", confidence=0.98)
-    mock_resp_model = create_mock_response_model("Flight EK522 from DXB to TRV is scheduled on time.")
+    mock_resp_model = create_mock_response_model(
+        "Flight EK522 from DXB to TRV is scheduled on time."
+    )
 
     mock_aviation_instance = MagicMock()
     mock_aviation_instance.get_flights = AsyncMock(return_value=aviation_envelope)
@@ -206,11 +212,12 @@ def test_flight_request_end_to_end(client: TestClient) -> None:
     mock_tavily_instance = MagicMock()
     mock_tavily_instance.search = AsyncMock()
 
-    with patch("app.agents.router_agent.get_chat_model", return_value=mock_router_model), \
-         patch("app.agents.flight_agent.AviationStackClient", return_value=mock_aviation_instance), \
-         patch("app.agents.research_agent.TavilySearchClient", return_value=mock_tavily_instance), \
-         patch("app.agents.response_agent.get_chat_model", return_value=mock_resp_model):
-
+    with (
+        patch("app.agents.router_agent.get_chat_model", return_value=mock_router_model),
+        patch("app.agents.flight_agent.AviationStackClient", return_value=mock_aviation_instance),
+        patch("app.agents.research_agent.TavilySearchClient", return_value=mock_tavily_instance),
+        patch("app.agents.response_agent.get_chat_model", return_value=mock_resp_model),
+    ):
         response = client.post("/api/v1/chat", json={"message": "Check flight EK522."})
 
     assert response.status_code == 200
@@ -231,7 +238,13 @@ def test_flight_request_end_to_end(client: TestClient) -> None:
     mock_tavily_instance.search.assert_not_called()
 
     # Verify no internal state leaked
-    for internal_field in ["active_agent", "completed_agents", "flight_query", "flight_results", "metadata"]:
+    for internal_field in [
+        "active_agent",
+        "completed_agents",
+        "flight_query",
+        "flight_results",
+        "metadata",
+    ]:
         assert internal_field not in payload
 
 
@@ -249,16 +262,19 @@ def test_flight_route_search_end_to_end(client: TestClient) -> None:
     aviation_envelope = build_aviation_response([flight_record])
 
     mock_router_model = create_mock_router_model("flight", confidence=0.95)
-    mock_resp_model = create_mock_response_model("Found scheduled flight EK523 operating from TRV to DXB.")
+    mock_resp_model = create_mock_response_model(
+        "Found scheduled flight EK523 operating from TRV to DXB."
+    )
 
     mock_aviation_instance = MagicMock()
     mock_aviation_instance.get_flights = AsyncMock(return_value=aviation_envelope)
     mock_aviation_instance.close = AsyncMock()
 
-    with patch("app.agents.router_agent.get_chat_model", return_value=mock_router_model), \
-         patch("app.agents.flight_agent.AviationStackClient", return_value=mock_aviation_instance), \
-         patch("app.agents.response_agent.get_chat_model", return_value=mock_resp_model):
-
+    with (
+        patch("app.agents.router_agent.get_chat_model", return_value=mock_router_model),
+        patch("app.agents.flight_agent.AviationStackClient", return_value=mock_aviation_instance),
+        patch("app.agents.response_agent.get_chat_model", return_value=mock_resp_model),
+    ):
         response = client.post(
             "/api/v1/chat",
             json={"message": "Find flights from Trivandrum to Dubai."},
@@ -302,11 +318,12 @@ def test_research_request_end_to_end(client: TestClient) -> None:
     mock_aviation_instance = MagicMock()
     mock_aviation_instance.get_flights = AsyncMock()
 
-    with patch("app.agents.router_agent.get_chat_model", return_value=mock_router_model), \
-         patch("app.agents.research_agent.TavilySearchClient", return_value=mock_tavily_instance), \
-         patch("app.agents.flight_agent.AviationStackClient", return_value=mock_aviation_instance), \
-         patch("app.agents.response_agent.get_chat_model", return_value=mock_resp_model):
-
+    with (
+        patch("app.agents.router_agent.get_chat_model", return_value=mock_router_model),
+        patch("app.agents.research_agent.TavilySearchClient", return_value=mock_tavily_instance),
+        patch("app.agents.flight_agent.AviationStackClient", return_value=mock_aviation_instance),
+        patch("app.agents.response_agent.get_chat_model", return_value=mock_resp_model),
+    ):
         response = client.post(
             "/api/v1/chat",
             json={"message": "What are the current visa requirements for Germany?"},
@@ -339,11 +356,14 @@ def test_general_travel_routes_to_research(client: TestClient) -> None:
     without creating a new agent.
     """
     mock_router_model = create_mock_router_model("general_travel", confidence=0.90)
-    mock_resp_model = create_mock_response_model("Here are general travel suggestions for your trip to Dubai.")
+    mock_resp_model = create_mock_response_model(
+        "Here are general travel suggestions for your trip to Dubai."
+    )
 
-    with patch("app.agents.router_agent.get_chat_model", return_value=mock_router_model), \
-         patch("app.agents.response_agent.get_chat_model", return_value=mock_resp_model):
-
+    with (
+        patch("app.agents.router_agent.get_chat_model", return_value=mock_router_model),
+        patch("app.agents.response_agent.get_chat_model", return_value=mock_resp_model),
+    ):
         response = client.post(
             "/api/v1/chat",
             json={"message": "Help me plan a trip to Dubai."},
@@ -379,12 +399,13 @@ def test_unsupported_request_bypasses_specialized_agents(client: TestClient) -> 
 
     mock_validator = AsyncMock(wraps=real_run_validator_agent)
 
-    with patch("app.agents.router_agent.get_chat_model", return_value=mock_router_model), \
-         patch("app.agents.flight_agent.AviationStackClient", return_value=mock_aviation_instance), \
-         patch("app.agents.research_agent.TavilySearchClient", return_value=mock_tavily_instance), \
-         patch("app.graph.nodes.run_validator_agent", side_effect=mock_validator), \
-         patch("app.agents.response_agent.get_chat_model", return_value=mock_resp_model):
-
+    with (
+        patch("app.agents.router_agent.get_chat_model", return_value=mock_router_model),
+        patch("app.agents.flight_agent.AviationStackClient", return_value=mock_aviation_instance),
+        patch("app.agents.research_agent.TavilySearchClient", return_value=mock_tavily_instance),
+        patch("app.graph.nodes.run_validator_agent", side_effect=mock_validator),
+        patch("app.agents.response_agent.get_chat_model", return_value=mock_resp_model),
+    ):
         response = client.post(
             "/api/v1/chat",
             json={"message": "Explain how to build a compiler in C++."},
@@ -410,15 +431,19 @@ def test_invalid_router_intent_safe_fallback(client: TestClient) -> None:
     Verify if the router classifies an unmapped intent (e.g. 'hotel'),
     the workflow routing in edges.py deterministically defaults to 'response'.
     """
+
     # Router produces 'hotel' which edge router safely defaults to 'response'
     async def mock_router_hotel(state: TravelState, **kwargs: Any) -> Dict[str, Any]:
         return {"intent": "hotel", "active_agent": "router_agent"}
 
-    mock_resp_model = create_mock_response_model("Hotel booking operations are currently outside our supported scope.")
+    mock_resp_model = create_mock_response_model(
+        "Hotel booking operations are currently outside our supported scope."
+    )
 
-    with patch("app.graph.nodes.aroute_request", side_effect=mock_router_hotel), \
-         patch("app.agents.response_agent.get_chat_model", return_value=mock_resp_model):
-
+    with (
+        patch("app.graph.nodes.aroute_request", side_effect=mock_router_hotel),
+        patch("app.agents.response_agent.get_chat_model", return_value=mock_resp_model),
+    ):
         response = client.post("/api/v1/chat", json={"message": "Find me a hotel in Paris."})
 
     assert response.status_code == 200
@@ -441,13 +466,16 @@ def test_aviationstack_provider_failure_reaches_api_safely(client: TestClient) -
 
     mock_aviation_instance = MagicMock()
     mock_aviation_instance.get_flights = AsyncMock(
-        side_effect=AviationStackAPIError(code="rate_limit_exceeded", message="Monthly limit reached")
+        side_effect=AviationStackAPIError(
+            code="rate_limit_exceeded", message="Monthly limit reached"
+        )
     )
     mock_aviation_instance.close = AsyncMock()
 
-    with patch("app.agents.router_agent.get_chat_model", return_value=mock_router_model), \
-         patch("app.agents.flight_agent.AviationStackClient", return_value=mock_aviation_instance):
-
+    with (
+        patch("app.agents.router_agent.get_chat_model", return_value=mock_router_model),
+        patch("app.agents.flight_agent.AviationStackClient", return_value=mock_aviation_instance),
+    ):
         response = client.post("/api/v1/chat", json={"message": "Check flight EK522."})
 
     assert response.status_code == 200
@@ -480,9 +508,10 @@ def test_tavily_provider_failure_reaches_api_safely(client: TestClient) -> None:
     )
     mock_tavily_instance.close = AsyncMock()
 
-    with patch("app.agents.router_agent.get_chat_model", return_value=mock_router_model), \
-         patch("app.agents.research_agent.TavilySearchClient", return_value=mock_tavily_instance):
-
+    with (
+        patch("app.agents.router_agent.get_chat_model", return_value=mock_router_model),
+        patch("app.agents.research_agent.TavilySearchClient", return_value=mock_tavily_instance),
+    ):
         response = client.post(
             "/api/v1/chat",
             json={"message": "What are the visa rules for Japan?"},
@@ -509,20 +538,24 @@ def test_router_openai_failure_handling(client: TestClient) -> None:
     """
     mock_router_model = MagicMock()
     mock_runnable = MagicMock()
-    mock_runnable.ainvoke = AsyncMock(side_effect=RuntimeError(f"Connection to OpenAI failed with key {FAKE_OPENAI_KEY}"))
+    mock_runnable.ainvoke = AsyncMock(
+        side_effect=RuntimeError(f"Connection to OpenAI failed with key {FAKE_OPENAI_KEY}")
+    )
     mock_router_model.with_structured_output = MagicMock(return_value=mock_runnable)
 
     mock_aviation_instance = MagicMock()
     mock_aviation_instance.get_flights = AsyncMock()
 
-    with patch("app.agents.router_agent.get_chat_model", return_value=mock_router_model), \
-         patch("app.agents.flight_agent.AviationStackClient", return_value=mock_aviation_instance):
-
+    with (
+        patch("app.agents.router_agent.get_chat_model", return_value=mock_router_model),
+        patch("app.agents.flight_agent.AviationStackClient", return_value=mock_aviation_instance),
+    ):
         response = client.post("/api/v1/chat", json={"message": "Check flight EK522."})
 
     assert response.status_code == 200
     payload = response.json()
     parsed = TravelResponse.model_validate(payload)
+    assert parsed is not None
 
     # Should not route to flight
     mock_aviation_instance.get_flights.assert_not_called()
@@ -555,10 +588,11 @@ def test_response_openai_failure_handling(client: TestClient) -> None:
         side_effect=RuntimeError(f"OpenAI service 500 error {FAKE_OPENAI_KEY}")
     )
 
-    with patch("app.agents.router_agent.get_chat_model", return_value=mock_router_model), \
-         patch("app.agents.flight_agent.AviationStackClient", return_value=mock_aviation_instance), \
-         patch("app.agents.response_agent.get_chat_model", return_value=mock_failing_resp_model):
-
+    with (
+        patch("app.agents.router_agent.get_chat_model", return_value=mock_router_model),
+        patch("app.agents.flight_agent.AviationStackClient", return_value=mock_aviation_instance),
+        patch("app.agents.response_agent.get_chat_model", return_value=mock_failing_resp_model),
+    ):
         response = client.post("/api/v1/chat", json={"message": "Check flight EK522."})
 
     assert response.status_code == 200
@@ -594,9 +628,10 @@ def test_validation_failure_handling(client: TestClient) -> None:
             "completed_agents": list(state.get("completed_agents", [])) + ["flight_agent"],
         }
 
-    with patch("app.agents.router_agent.get_chat_model", return_value=mock_router_model), \
-         patch("app.graph.nodes.run_flight_agent", side_effect=mock_flight_with_contradiction):
-
+    with (
+        patch("app.agents.router_agent.get_chat_model", return_value=mock_router_model),
+        patch("app.graph.nodes.run_flight_agent", side_effect=mock_flight_with_contradiction),
+    ):
         response = client.post(
             "/api/v1/chat",
             json={"message": "Check flight from Dubai to Dubai."},
@@ -609,7 +644,9 @@ def test_validation_failure_handling(client: TestClient) -> None:
     # Response layer must respect validation failure
     assert parsed.status == ResponseStatus.PARTIAL
     # Must contain validation error information
-    assert any("origin and destination cannot be identical" in err.message.lower() for err in parsed.errors)
+    assert any(
+        "origin and destination cannot be identical" in err.message.lower() for err in parsed.errors
+    )
 
 
 # ===========================================================================
@@ -629,9 +666,10 @@ def test_flight_no_results_preserves_status(client: TestClient) -> None:
     mock_aviation_instance.get_flights = AsyncMock(return_value=aviation_envelope)
     mock_aviation_instance.close = AsyncMock()
 
-    with patch("app.agents.router_agent.get_chat_model", return_value=mock_router_model), \
-         patch("app.agents.flight_agent.AviationStackClient", return_value=mock_aviation_instance):
-
+    with (
+        patch("app.agents.router_agent.get_chat_model", return_value=mock_router_model),
+        patch("app.agents.flight_agent.AviationStackClient", return_value=mock_aviation_instance),
+    ):
         response = client.post("/api/v1/chat", json={"message": "Check flight EK99999."})
 
     assert response.status_code == 200
@@ -657,9 +695,10 @@ def test_research_no_results_preserves_status(client: TestClient) -> None:
     mock_tavily_instance.search = AsyncMock(return_value=tavily_envelope)
     mock_tavily_instance.close = AsyncMock()
 
-    with patch("app.agents.router_agent.get_chat_model", return_value=mock_router_model), \
-         patch("app.agents.research_agent.TavilySearchClient", return_value=mock_tavily_instance):
-
+    with (
+        patch("app.agents.router_agent.get_chat_model", return_value=mock_router_model),
+        patch("app.agents.research_agent.TavilySearchClient", return_value=mock_tavily_instance),
+    ):
         response = client.post(
             "/api/v1/chat",
             json={"message": "What are visa regulations for Atlantis?"},
@@ -704,10 +743,11 @@ def test_research_source_propagation(client: TestClient) -> None:
 
     mock_resp_model = create_mock_response_model("Here is research based on official sources.")
 
-    with patch("app.agents.router_agent.get_chat_model", return_value=mock_router_model), \
-         patch("app.agents.research_agent.TavilySearchClient", return_value=mock_tavily_instance), \
-         patch("app.agents.response_agent.get_chat_model", return_value=mock_resp_model):
-
+    with (
+        patch("app.agents.router_agent.get_chat_model", return_value=mock_router_model),
+        patch("app.agents.research_agent.TavilySearchClient", return_value=mock_tavily_instance),
+        patch("app.agents.response_agent.get_chat_model", return_value=mock_resp_model),
+    ):
         response = client.post(
             "/api/v1/chat",
             json={"message": "Current travel advisories for Iceland"},
@@ -735,9 +775,10 @@ def test_session_id_propagation(client: TestClient) -> None:
     mock_router_model = create_mock_router_model("unsupported", confidence=1.0)
     mock_resp_model = create_mock_response_model("General acknowledgment.")
 
-    with patch("app.agents.router_agent.get_chat_model", return_value=mock_router_model), \
-         patch("app.agents.response_agent.get_chat_model", return_value=mock_resp_model):
-
+    with (
+        patch("app.agents.router_agent.get_chat_model", return_value=mock_router_model),
+        patch("app.agents.response_agent.get_chat_model", return_value=mock_resp_model),
+    ):
         response = client.post(
             "/api/v1/chat",
             json={
@@ -770,9 +811,10 @@ def test_request_id_generation_unique(client: TestClient) -> None:
 
     mock_resp_model = create_mock_response_model("Response text.")
 
-    with patch("app.graph.nodes.aroute_request", side_effect=spy_router), \
-         patch("app.agents.response_agent.get_chat_model", return_value=mock_resp_model):
-
+    with (
+        patch("app.graph.nodes.aroute_request", side_effect=spy_router),
+        patch("app.agents.response_agent.get_chat_model", return_value=mock_resp_model),
+    ):
         resp1 = client.post("/api/v1/chat", json={"message": "First request."})
         resp2 = client.post("/api/v1/chat", json={"message": "Second request."})
 
@@ -797,13 +839,16 @@ def test_state_isolation_between_requests(client: TestClient) -> None:
     flight = build_sample_flight(flight_iata="EK522")
     aviation_env = build_aviation_response([flight])
     mock_router_flight = create_mock_router_model("flight")
-    mock_aviation_inst = MagicMock(get_flights=AsyncMock(return_value=aviation_env), close=AsyncMock())
+    mock_aviation_inst = MagicMock(
+        get_flights=AsyncMock(return_value=aviation_env), close=AsyncMock()
+    )
     mock_resp_flight = create_mock_response_model("EK522 flight details.")
 
-    with patch("app.agents.router_agent.get_chat_model", return_value=mock_router_flight), \
-         patch("app.agents.flight_agent.AviationStackClient", return_value=mock_aviation_inst), \
-         patch("app.agents.response_agent.get_chat_model", return_value=mock_resp_flight):
-
+    with (
+        patch("app.agents.router_agent.get_chat_model", return_value=mock_router_flight),
+        patch("app.agents.flight_agent.AviationStackClient", return_value=mock_aviation_inst),
+        patch("app.agents.response_agent.get_chat_model", return_value=mock_resp_flight),
+    ):
         resp_flight = client.post("/api/v1/chat", json={"message": "Check flight EK522."})
 
     assert resp_flight.status_code == 200
@@ -816,11 +861,14 @@ def test_state_isolation_between_requests(client: TestClient) -> None:
     mock_tavily_inst = MagicMock(search=AsyncMock(return_value=tavily_env), close=AsyncMock())
     mock_resp_research = create_mock_response_model("Germany visa details.")
 
-    with patch("app.agents.router_agent.get_chat_model", return_value=mock_router_research), \
-         patch("app.agents.research_agent.TavilySearchClient", return_value=mock_tavily_inst), \
-         patch("app.agents.response_agent.get_chat_model", return_value=mock_resp_research):
-
-        resp_research = client.post("/api/v1/chat", json={"message": "Visa requirements for Germany."})
+    with (
+        patch("app.agents.router_agent.get_chat_model", return_value=mock_router_research),
+        patch("app.agents.research_agent.TavilySearchClient", return_value=mock_tavily_inst),
+        patch("app.agents.response_agent.get_chat_model", return_value=mock_resp_research),
+    ):
+        resp_research = client.post(
+            "/api/v1/chat", json={"message": "Visa requirements for Germany."}
+        )
 
     assert resp_research.status_code == 200
     research_payload = resp_research.json()
@@ -843,9 +891,10 @@ def test_repeated_requests_independence(client: TestClient) -> None:
     mock_router_model = create_mock_router_model("unsupported")
     mock_resp_model = create_mock_response_model("Clean response.")
 
-    with patch("app.agents.router_agent.get_chat_model", return_value=mock_router_model), \
-         patch("app.agents.response_agent.get_chat_model", return_value=mock_resp_model):
-
+    with (
+        patch("app.agents.router_agent.get_chat_model", return_value=mock_router_model),
+        patch("app.agents.response_agent.get_chat_model", return_value=mock_resp_model),
+    ):
         for _ in range(3):
             response = client.post("/api/v1/chat", json={"message": "Hello ZICO."})
             assert response.status_code == 200
@@ -864,15 +913,15 @@ async def test_concurrent_requests_state_isolation() -> None:
     Verify concurrent async HTTP requests process independently without race conditions
     or state contamination across graph runs.
     """
-    mock_flight_router = create_mock_router_model("flight")
+    _mock_flight_router = create_mock_router_model("flight")
     flight_env = build_aviation_response([build_sample_flight(flight_iata="EK522")])
     mock_aviation = MagicMock(get_flights=AsyncMock(return_value=flight_env), close=AsyncMock())
-    mock_flight_resp = create_mock_response_model("EK522 scheduled.")
+    _mock_flight_resp = create_mock_response_model("EK522 scheduled.")
 
-    mock_research_router = create_mock_router_model("research")
+    _mock_research_router = create_mock_router_model("research")
     research_env = build_tavily_response(build_sample_research_results())
     mock_tavily = MagicMock(search=AsyncMock(return_value=research_env), close=AsyncMock())
-    mock_research_resp = create_mock_response_model("Visa guidance.")
+    _mock_research_resp = create_mock_response_model("Visa guidance.")
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
@@ -884,7 +933,9 @@ async def test_concurrent_requests_state_isolation() -> None:
             return RouterDecision(intent="research", confidence=1.0)
 
         mock_dynamic_runnable = MagicMock(ainvoke=AsyncMock(side_effect=mock_router_dispatch))
-        mock_dynamic_router = MagicMock(with_structured_output=MagicMock(return_value=mock_dynamic_runnable))
+        mock_dynamic_router = MagicMock(
+            with_structured_output=MagicMock(return_value=mock_dynamic_runnable)
+        )
 
         async def mock_resp_dispatch(messages: Any) -> Any:
             prompt = str(messages[-1].content) if messages else ""
@@ -894,13 +945,19 @@ async def test_concurrent_requests_state_isolation() -> None:
 
         mock_dynamic_resp = MagicMock(ainvoke=AsyncMock(side_effect=mock_resp_dispatch))
 
-        with patch("app.agents.router_agent.get_chat_model", return_value=mock_dynamic_router), \
-             patch("app.agents.flight_agent.AviationStackClient", return_value=mock_aviation), \
-             patch("app.agents.research_agent.TavilySearchClient", return_value=mock_tavily), \
-             patch("app.agents.response_agent.get_chat_model", return_value=mock_dynamic_resp):
-
-            task1 = ac.post("/api/v1/chat", json={"message": "Check flight EK522.", "session_id": "sess-flight"})
-            task2 = ac.post("/api/v1/chat", json={"message": "Research visa requirements.", "session_id": "sess-research"})
+        with (
+            patch("app.agents.router_agent.get_chat_model", return_value=mock_dynamic_router),
+            patch("app.agents.flight_agent.AviationStackClient", return_value=mock_aviation),
+            patch("app.agents.research_agent.TavilySearchClient", return_value=mock_tavily),
+            patch("app.agents.response_agent.get_chat_model", return_value=mock_dynamic_resp),
+        ):
+            task1 = ac.post(
+                "/api/v1/chat", json={"message": "Check flight EK522.", "session_id": "sess-flight"}
+            )
+            task2 = ac.post(
+                "/api/v1/chat",
+                json={"message": "Research visa requirements.", "session_id": "sess-research"},
+            )
 
             resp1, resp2 = await asyncio.gather(task1, task2)
 
@@ -928,9 +985,10 @@ def test_public_api_contract_compliance(client: TestClient) -> None:
     mock_router_model = create_mock_router_model("unsupported")
     mock_resp_model = create_mock_response_model("Direct response.")
 
-    with patch("app.agents.router_agent.get_chat_model", return_value=mock_router_model), \
-         patch("app.agents.response_agent.get_chat_model", return_value=mock_resp_model):
-
+    with (
+        patch("app.agents.router_agent.get_chat_model", return_value=mock_router_model),
+        patch("app.agents.response_agent.get_chat_model", return_value=mock_resp_model),
+    ):
         response = client.post("/api/v1/chat", json={"message": "Hello ZICO."})
 
     assert response.status_code == 200
@@ -962,10 +1020,11 @@ def test_internal_state_protection(client: TestClient) -> None:
     mock_aviation_inst = MagicMock(get_flights=AsyncMock(return_value=env), close=AsyncMock())
     mock_resp_model = create_mock_response_model("EK522 is scheduled.")
 
-    with patch("app.agents.router_agent.get_chat_model", return_value=mock_router_model), \
-         patch("app.agents.flight_agent.AviationStackClient", return_value=mock_aviation_inst), \
-         patch("app.agents.response_agent.get_chat_model", return_value=mock_resp_model):
-
+    with (
+        patch("app.agents.router_agent.get_chat_model", return_value=mock_router_model),
+        patch("app.agents.flight_agent.AviationStackClient", return_value=mock_aviation_inst),
+        patch("app.agents.response_agent.get_chat_model", return_value=mock_resp_model),
+    ):
         response = client.post("/api/v1/chat", json={"message": "Check flight EK522."})
 
     assert response.status_code == 200
@@ -990,7 +1049,9 @@ def test_secret_protection_end_to_end(client: TestClient) -> None:
     mock_runnable = MagicMock()
     # Injected exception with secret key
     mock_runnable.ainvoke = AsyncMock(
-        side_effect=RuntimeError(f"Critical failure exposing {FAKE_OPENAI_KEY} and {FAKE_TAVILY_KEY}")
+        side_effect=RuntimeError(
+            f"Critical failure exposing {FAKE_OPENAI_KEY} and {FAKE_TAVILY_KEY}"
+        )
     )
     mock_router_model.with_structured_output = MagicMock(return_value=mock_runnable)
 
@@ -1055,9 +1116,10 @@ def test_health_endpoint_isolation(client: TestClient) -> None:
     """
     Verify GET /health returns 200 with zero workflow, LLM, or tool calls.
     """
-    with patch("app.api.routes.run_workflow") as mock_workflow, \
-         patch("app.core.llm.get_chat_model") as mock_llm:
-
+    with (
+        patch("app.api.routes.run_workflow") as mock_workflow,
+        patch("app.core.llm.get_chat_model") as mock_llm,
+    ):
         response = client.get("/health")
 
     assert response.status_code == 200
@@ -1119,17 +1181,20 @@ def test_agent_execution_order_flight(client: TestClient) -> None:
     sample_flight = build_sample_flight(flight_iata="EK522")
     aviation_env = build_aviation_response([sample_flight])
     mock_router_model = create_mock_router_model("flight")
-    mock_aviation_inst = MagicMock(get_flights=AsyncMock(return_value=aviation_env), close=AsyncMock())
+    mock_aviation_inst = MagicMock(
+        get_flights=AsyncMock(return_value=aviation_env), close=AsyncMock()
+    )
     mock_resp_model = create_mock_response_model("EK522 scheduled.")
 
-    with patch("app.graph.nodes.aroute_request", side_effect=spy_router), \
-         patch("app.graph.nodes.run_flight_agent", side_effect=spy_flight), \
-         patch("app.graph.nodes.run_validator_agent", side_effect=spy_validator), \
-         patch("app.graph.nodes.run_response_agent", side_effect=spy_response), \
-         patch("app.agents.router_agent.get_chat_model", return_value=mock_router_model), \
-         patch("app.agents.flight_agent.AviationStackClient", return_value=mock_aviation_inst), \
-         patch("app.agents.response_agent.get_chat_model", return_value=mock_resp_model):
-
+    with (
+        patch("app.graph.nodes.aroute_request", side_effect=spy_router),
+        patch("app.graph.nodes.run_flight_agent", side_effect=spy_flight),
+        patch("app.graph.nodes.run_validator_agent", side_effect=spy_validator),
+        patch("app.graph.nodes.run_response_agent", side_effect=spy_response),
+        patch("app.agents.router_agent.get_chat_model", return_value=mock_router_model),
+        patch("app.agents.flight_agent.AviationStackClient", return_value=mock_aviation_inst),
+        patch("app.agents.response_agent.get_chat_model", return_value=mock_resp_model),
+    ):
         response = client.post("/api/v1/chat", json={"message": "Check flight EK522."})
 
     assert response.status_code == 200
@@ -1164,14 +1229,15 @@ def test_agent_execution_order_research(client: TestClient) -> None:
     mock_tavily_inst = MagicMock(search=AsyncMock(return_value=tavily_env), close=AsyncMock())
     mock_resp_model = create_mock_response_model("Visa guidance.")
 
-    with patch("app.graph.nodes.aroute_request", side_effect=spy_router), \
-         patch("app.graph.nodes.run_research_agent", side_effect=spy_research), \
-         patch("app.graph.nodes.run_validator_agent", side_effect=spy_validator), \
-         patch("app.graph.nodes.run_response_agent", side_effect=spy_response), \
-         patch("app.agents.router_agent.get_chat_model", return_value=mock_router_model), \
-         patch("app.agents.research_agent.TavilySearchClient", return_value=mock_tavily_inst), \
-         patch("app.agents.response_agent.get_chat_model", return_value=mock_resp_model):
-
+    with (
+        patch("app.graph.nodes.aroute_request", side_effect=spy_router),
+        patch("app.graph.nodes.run_research_agent", side_effect=spy_research),
+        patch("app.graph.nodes.run_validator_agent", side_effect=spy_validator),
+        patch("app.graph.nodes.run_response_agent", side_effect=spy_response),
+        patch("app.agents.router_agent.get_chat_model", return_value=mock_router_model),
+        patch("app.agents.research_agent.TavilySearchClient", return_value=mock_tavily_inst),
+        patch("app.agents.response_agent.get_chat_model", return_value=mock_resp_model),
+    ):
         response = client.post("/api/v1/chat", json={"message": "Visa requirements for Germany."})
 
     assert response.status_code == 200
@@ -1196,11 +1262,12 @@ def test_agent_execution_order_unsupported(client: TestClient) -> None:
     mock_router_model = create_mock_router_model("unsupported")
     mock_resp_model = create_mock_response_model("Out of scope.")
 
-    with patch("app.graph.nodes.aroute_request", side_effect=spy_router), \
-         patch("app.graph.nodes.run_response_agent", side_effect=spy_response), \
-         patch("app.agents.router_agent.get_chat_model", return_value=mock_router_model), \
-         patch("app.agents.response_agent.get_chat_model", return_value=mock_resp_model):
-
+    with (
+        patch("app.graph.nodes.aroute_request", side_effect=spy_router),
+        patch("app.graph.nodes.run_response_agent", side_effect=spy_response),
+        patch("app.agents.router_agent.get_chat_model", return_value=mock_router_model),
+        patch("app.agents.response_agent.get_chat_model", return_value=mock_resp_model),
+    ):
         response = client.post("/api/v1/chat", json={"message": "Write a python script."})
 
     assert response.status_code == 200

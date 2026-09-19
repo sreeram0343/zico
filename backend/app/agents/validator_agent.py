@@ -83,7 +83,11 @@ class ValidatorAgent:
 
     def _validate_session_and_query(self, state: TravelState, errors: List[str]) -> None:
         """Validate presence and basic structure of user_query."""
-        user_query = state.get("user_query") if isinstance(state, dict) else getattr(state, "user_query", None)
+        user_query = (
+            state.get("user_query")
+            if isinstance(state, dict)
+            else getattr(state, "user_query", None)
+        )
         if user_query is None or not isinstance(user_query, str) or not user_query.strip():
             errors.append("Missing or empty user_query in TravelState.")
 
@@ -99,7 +103,11 @@ class ValidatorAgent:
     def _validate_travel_parameters(self, state: TravelState, errors: List[str]) -> None:
         """Validate dates, passenger counts, and route consistency."""
         # 1. Passenger Count Validation
-        passengers = state.get("passengers") if isinstance(state, dict) else getattr(state, "passengers", None)
+        passengers = (
+            state.get("passengers")
+            if isinstance(state, dict)
+            else getattr(state, "passengers", None)
+        )
         if passengers is not None:
             if not isinstance(passengers, int) or isinstance(passengers, bool) or passengers < 1:
                 errors.append(
@@ -107,8 +115,16 @@ class ValidatorAgent:
                 )
 
         # 2. Date Relationship Validation
-        dep_str = state.get("departure_date") if isinstance(state, dict) else getattr(state, "departure_date", None)
-        ret_str = state.get("return_date") if isinstance(state, dict) else getattr(state, "return_date", None)
+        dep_str = (
+            state.get("departure_date")
+            if isinstance(state, dict)
+            else getattr(state, "departure_date", None)
+        )
+        ret_str = (
+            state.get("return_date")
+            if isinstance(state, dict)
+            else getattr(state, "return_date", None)
+        )
 
         if dep_str and ret_str:
             dep_dt = _parse_date(dep_str)
@@ -122,8 +138,14 @@ class ValidatorAgent:
         # 3. Route Contradiction Validation (for flight intent)
         intent = state.get("intent") if isinstance(state, dict) else getattr(state, "intent", None)
         if intent == "flight":
-            origin = state.get("origin") if isinstance(state, dict) else getattr(state, "origin", None)
-            destination = state.get("destination") if isinstance(state, dict) else getattr(state, "destination", None)
+            origin = (
+                state.get("origin") if isinstance(state, dict) else getattr(state, "origin", None)
+            )
+            destination = (
+                state.get("destination")
+                if isinstance(state, dict)
+                else getattr(state, "destination", None)
+            )
             if origin and destination and isinstance(origin, str) and isinstance(destination, str):
                 orig_clean = origin.strip().upper()
                 dest_clean = destination.strip().upper()
@@ -134,7 +156,11 @@ class ValidatorAgent:
 
     def _validate_flight_operations(self, state: TravelState, errors: List[str]) -> None:
         """Validate flight state consistency and result structure for flight requests."""
-        flight_status = state.get("flight_status") if isinstance(state, dict) else getattr(state, "flight_status", None)
+        flight_status = (
+            state.get("flight_status")
+            if isinstance(state, dict)
+            else getattr(state, "flight_status", None)
+        )
 
         if flight_status == "error":
             errors.append("Flight operation encountered an execution or provider error.")
@@ -161,7 +187,9 @@ class ValidatorAgent:
 
                 # Ensure minimum structural identity exists
                 has_id = bool(item.get("flight_iata") or item.get("flight_number"))
-                has_route = bool(item.get("departure") or item.get("arrival") or item.get("airline_name"))
+                has_route = bool(
+                    item.get("departure") or item.get("arrival") or item.get("airline_name")
+                )
                 if not has_id and not has_route:
                     errors.append(
                         f"Malformed flight result at index {idx}: missing flight identifier or route details."
@@ -170,7 +198,9 @@ class ValidatorAgent:
     def _validate_research_operations(self, state: TravelState, errors: List[str]) -> None:
         """Validate research state consistency, result structure, and source provenance."""
         research_status = (
-            state.get("research_status") if isinstance(state, dict) else getattr(state, "research_status", None)
+            state.get("research_status")
+            if isinstance(state, dict)
+            else getattr(state, "research_status", None)
         )
 
         if research_status == "error":
@@ -206,9 +236,7 @@ class ValidatorAgent:
                 # 2. Content or summary must be present
                 content = item.get("content")
                 if content is None or not isinstance(content, str):
-                    errors.append(
-                        f"Research result at index {idx} is missing text content."
-                    )
+                    errors.append(f"Research result at index {idx} is missing text content.")
 
     def validate(self, state: TravelState) -> Dict[str, Any]:
         """
@@ -252,7 +280,9 @@ class ValidatorAgent:
         if status == "passed":
             logger.info("Validation passed successfully with 0 errors")
         else:
-            logger.warning("Validation failed with %d error(s): %s", len(deduped_errors), deduped_errors)
+            logger.warning(
+                "Validation failed with %d error(s): %s", len(deduped_errors), deduped_errors
+            )
 
         return {
             "validation_status": status,

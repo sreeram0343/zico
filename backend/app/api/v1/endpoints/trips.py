@@ -1,9 +1,11 @@
-from typing import Any, Dict, List, Optional
 import uuid
+from typing import Any, Dict, List, Optional
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.db.models import Trip
 from app.db.session import get_db
 from app.graph.state import TripConstraints, TripSegment

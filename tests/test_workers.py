@@ -1,10 +1,11 @@
 from datetime import datetime, timedelta
 from unittest.mock import patch
-from langchain_core.messages import AIMessage, HumanMessage
+
 import pytest
+from langchain_core.messages import AIMessage, HumanMessage
+
 from app.graph.engine import (
     build_zico_graph,
-    create_zico_graph,
     disruption_worker_node,
     flight_search_worker_node,
     policy_rag_worker_node,
@@ -12,12 +13,10 @@ from app.graph.engine import (
 )
 from app.graph.state import (
     ActionStatus,
-    ActionType,
     Location,
     SegmentType,
     TripConstraints,
     TripSegment,
-    ZicoGraphState,
 )
 
 
@@ -54,7 +53,11 @@ def test_flight_search_worker_node_execution(sample_state):
                     {
                         "airline": "British Airways",
                         "flight_number": "BA 112",
-                        "departure_airport": {"name": "JFK", "id": "JFK", "time": "2026-09-10 18:30"},
+                        "departure_airport": {
+                            "name": "JFK",
+                            "id": "JFK",
+                            "time": "2026-09-10 18:30",
+                        },
                         "arrival_airport": {"name": "LHR", "id": "LHR", "time": "2026-09-11 06:30"},
                         "duration": 420,
                     }
@@ -78,7 +81,9 @@ def test_flight_search_worker_node_execution(sample_state):
 def test_policy_rag_worker_node_execution(sample_state):
     """Verify policy RAG worker queries vector store and returns grounded guidance."""
     state = dict(sample_state)
-    state["messages"] = [HumanMessage(content="What is the EU 261 flight cancellation compensation?")]
+    state["messages"] = [
+        HumanMessage(content="What is the EU 261 flight cancellation compensation?")
+    ]
 
     result = policy_rag_worker_node(state)
     assert "messages" in result
@@ -121,5 +126,3 @@ def test_end_to_end_graph_with_worker_routing(sample_state):
         assert len(result["messages"]) >= 2
         ai_messages = [m for m in result["messages"] if isinstance(m, AIMessage)]
         assert len(ai_messages) >= 1
-
-

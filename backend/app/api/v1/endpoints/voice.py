@@ -1,6 +1,8 @@
 from typing import Optional
+
 from fastapi import APIRouter, File, Form, HTTPException, Response, UploadFile
 from pydantic import BaseModel, Field
+
 from app.services.voice import get_voice_service
 
 router = APIRouter()
@@ -8,7 +10,9 @@ router = APIRouter()
 
 class SynthesizeRequest(BaseModel):
     text: str = Field(description="Text content to convert into speech")
-    voice: Optional[str] = Field(default="en-US-JennyNeural", description="Voice profile identifier")
+    voice: Optional[str] = Field(
+        default="en-US-JennyNeural", description="Voice profile identifier"
+    )
 
 
 class TranscribeResponse(BaseModel):

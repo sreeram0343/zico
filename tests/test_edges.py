@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import copy
 import inspect
-from typing import Any, Dict
+from typing import Any
 
 import pytest
 
@@ -34,7 +34,6 @@ from app.graph.edges import (
     ROUTE_MAP,
     route_after_router,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixture: Base TravelState
@@ -291,7 +290,9 @@ def test_edges_file_architecture_compliance() -> None:
         ".compile(",
     ]
     for token in prohibited_graph_tokens:
-        assert token not in source, f"app.graph.edges must not contain graph building token: {token!r}"
+        assert token not in source, (
+            f"app.graph.edges must not contain graph building token: {token!r}"
+        )
 
     # Must NOT execute LLMs or tools
     prohibited_tool_tokens = [
@@ -305,4 +306,6 @@ def test_edges_file_architecture_compliance() -> None:
         "requests.post",
     ]
     for token in prohibited_tool_tokens:
-        assert token not in source, f"app.graph.edges must not contain tool/LLM execution token: {token!r}"
+        assert token not in source, (
+            f"app.graph.edges must not contain tool/LLM execution token: {token!r}"
+        )

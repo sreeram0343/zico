@@ -20,10 +20,9 @@ Tests cover:
 from __future__ import annotations
 
 import importlib
-import inspect
 from pathlib import Path
 from typing import Any, Dict, List, Set, Tuple
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi import FastAPI
@@ -60,6 +59,7 @@ def _collect_all_routes(application: FastAPI) -> List[Tuple[str, Set[str]]]:
 # 1. Application Creation & Metadata
 # ===========================================================================
 
+
 def test_app_is_fastapi_instance() -> None:
     """Verify that app is an authentic FastAPI application instance."""
     assert isinstance(app, FastAPI)
@@ -82,6 +82,7 @@ def test_no_unimplemented_claims_in_description() -> None:
 # ===========================================================================
 # 2. Health Endpoint
 # ===========================================================================
+
 
 def test_health_endpoint_success(client: TestClient) -> None:
     """Verify GET /health returns 200 OK and expected JSON body."""
@@ -111,9 +112,11 @@ def test_health_endpoint_isolation(client: TestClient) -> None:
     """
     Verify GET /health performs zero external calls or workflow executions.
     """
-    with patch("app.graph.workflow.run_workflow") as mock_wf, \
-         patch("httpx.AsyncClient.request") as mock_httpx, \
-         patch("openai.OpenAI") as mock_openai:
+    with (
+        patch("app.graph.workflow.run_workflow") as mock_wf,
+        patch("httpx.AsyncClient.request") as mock_httpx,
+        patch("openai.OpenAI") as mock_openai,
+    ):
         response = client.get("/health")
         assert response.status_code == 200
         assert response.json() == {"status": "ok"}
@@ -127,6 +130,7 @@ def test_health_endpoint_isolation(client: TestClient) -> None:
 # 3. Route Mounting & Router Verification
 # ===========================================================================
 
+
 def test_chat_route_is_registered() -> None:
     """Verify POST /api/v1/chat is properly mounted on the application."""
     all_routes = _collect_all_routes(app)
@@ -135,7 +139,9 @@ def test_chat_route_is_registered() -> None:
         for path, methods in all_routes
         if path == "/api/v1/chat" and "POST" in methods
     ]
-    assert len(chat_routes) == 1, f"Expected exactly 1 POST /api/v1/chat route, found {len(chat_routes)}"
+    assert len(chat_routes) == 1, (
+        f"Expected exactly 1 POST /api/v1/chat route, found {len(chat_routes)}"
+    )
 
 
 def test_no_duplicate_chat_route() -> None:
@@ -160,18 +166,15 @@ def test_no_unwanted_root_endpoint(client: TestClient) -> None:
 
 def test_router_identity() -> None:
     """Verify that the mounted router corresponds to app.api.routes.router."""
-    included_routers = [
-        r for r in app.routes if getattr(r, "original_router", None) is not None
-    ]
-    matching = [
-        r for r in included_routers if r.original_router is chat_router
-    ]
+    included_routers = [r for r in app.routes if getattr(r, "original_router", None) is not None]
+    matching = [r for r in included_routers if r.original_router is chat_router]
     assert len(matching) == 1
 
 
 # ===========================================================================
 # 4. Chat Endpoint Integration through Application
 # ===========================================================================
+
 
 def test_chat_endpoint_valid_request(client: TestClient) -> None:
     """
@@ -227,6 +230,7 @@ def test_chat_endpoint_validation_error(client: TestClient) -> None:
 # 5. OpenAPI & Documentation
 # ===========================================================================
 
+
 def test_openapi_schema(client: TestClient) -> None:
     """Verify GET /openapi.json contains expected endpoints and metadata."""
     response = client.get("/openapi.json")
@@ -253,11 +257,13 @@ def test_docs_endpoint(client: TestClient) -> None:
 # 6. Import Safety & Server Behavior
 # ===========================================================================
 
+
 def test_app_import_is_non_blocking() -> None:
     """
     Ensure importing app does not start an active uvicorn server or block execution.
     """
     import app.main as main_mod
+
     assert hasattr(main_mod, "app")
     assert not getattr(main_mod.app, "_is_running", False)
 
@@ -266,10 +272,13 @@ def test_app_import_no_external_network_activity() -> None:
     """
     Verify reloading app.main does not invoke external network calls.
     """
-    with patch("httpx.AsyncClient.request") as mock_httpx_async, \
-         patch("httpx.Client.request") as mock_httpx_sync, \
-         patch("requests.request") as mock_requests:
+    with (
+        patch("httpx.AsyncClient.request") as mock_httpx_async,
+        patch("httpx.Client.request") as mock_httpx_sync,
+        patch("requests.request") as mock_requests,
+    ):
         import app.main as main_mod
+
         importlib.reload(main_mod)
 
         mock_httpx_async.assert_not_called()
@@ -281,11 +290,13 @@ def test_app_import_no_external_network_activity() -> None:
 # 7. Logging Configuration & Idempotency
 # ===========================================================================
 
+
 def test_logging_is_configured_and_idempotent() -> None:
     """
     Verify configure_logging is called and safe against duplicate handlers.
     """
     import logging
+
     root_logger = logging.getLogger()
     initial_count = len(root_logger.handlers)
 
@@ -298,11 +309,13 @@ def test_logging_is_configured_and_idempotent() -> None:
 # 8. Source Code Architectural Guardrails
 # ===========================================================================
 
+
 def test_main_source_has_no_secret_names() -> None:
     """
     Ensure app/main.py contains no hardcoded secrets or environment reading.
     """
     import app.main as main_mod
+
     main_path = Path(main_mod.__file__).resolve()
     source_code = main_path.read_text(encoding="utf-8")
 
@@ -322,6 +335,7 @@ def test_main_source_has_no_business_logic_or_external_providers() -> None:
     Ensure app/main.py contains no direct LLM providers, database imports, or workflow graph construction.
     """
     import app.main as main_mod
+
     main_path = Path(main_mod.__file__).resolve()
     source_code = main_path.read_text(encoding="utf-8")
 

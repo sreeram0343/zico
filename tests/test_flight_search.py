@@ -1,5 +1,5 @@
-from datetime import datetime
 from unittest.mock import patch
+
 import pytest
 
 from app.graph.state import SegmentType, TripSegment
@@ -17,8 +17,16 @@ def test_parse_flight_to_trip_segment_success():
             {
                 "airline": "Delta Air Lines",
                 "flight_number": "DL 123",
-                "departure_airport": {"name": "John F. Kennedy Intl", "id": "JFK", "time": "2026-09-15 08:00"},
-                "arrival_airport": {"name": "Los Angeles Intl", "id": "LAX", "time": "2026-09-15 11:30"},
+                "departure_airport": {
+                    "name": "John F. Kennedy Intl",
+                    "id": "JFK",
+                    "time": "2026-09-15 08:00",
+                },
+                "arrival_airport": {
+                    "name": "Los Angeles Intl",
+                    "id": "LAX",
+                    "time": "2026-09-15 11:30",
+                },
                 "duration": 330,
             }
         ],
@@ -87,12 +95,18 @@ def test_parse_flight_invalid_chronology_raises_validation_error():
                 "airline": "United",
                 "flight_number": "UA 100",
                 "departure_airport": {"name": "SFO", "id": "SFO", "time": "2026-09-15 15:00"},
-                "arrival_airport": {"name": "ORD", "id": "ORD", "time": "2026-09-15 10:00"},  # 5 hours earlier
+                "arrival_airport": {
+                    "name": "ORD",
+                    "id": "ORD",
+                    "time": "2026-09-15 10:00",
+                },  # 5 hours earlier
             }
         ],
         "price": 200.0,
     }
-    with pytest.raises(FlightSearchValidationError, match="arrival time.*must be strictly after departure"):
+    with pytest.raises(
+        FlightSearchValidationError, match="arrival time.*must be strictly after departure"
+    ):
         parse_flight_to_trip_segment(invalid_entry)
 
 
@@ -122,7 +136,11 @@ def test_search_flights_tool_success(mock_search):
                     {
                         "airline": "United Airlines",
                         "flight_number": "UA 456",
-                        "departure_airport": {"name": "SFO", "id": "SFO", "time": "2026-09-15 09:00"},
+                        "departure_airport": {
+                            "name": "SFO",
+                            "id": "SFO",
+                            "time": "2026-09-15 09:00",
+                        },
                         "arrival_airport": {"name": "ORD", "id": "ORD", "time": "2026-09-15 15:00"},
                         "duration": 240,
                     }
@@ -133,12 +151,14 @@ def test_search_flights_tool_success(mock_search):
         ]
     }
 
-    results = search_flights.invoke({
-        "departure_id": "SFO",
-        "arrival_id": "ORD",
-        "outbound_date": "2026-09-15",
-        "currency": "USD",
-    })
+    results = search_flights.invoke(
+        {
+            "departure_id": "SFO",
+            "arrival_id": "ORD",
+            "outbound_date": "2026-09-15",
+            "currency": "USD",
+        }
+    )
 
     assert isinstance(results, list)
     assert len(results) == 1
@@ -153,11 +173,13 @@ def test_search_flights_tool_api_error(mock_search):
     """Verify graceful handling and empty TripSegment list returned on API failure."""
     mock_search.side_effect = Exception("AviationStack network outage")
 
-    result = search_flights.invoke({
-        "departure_id": "JFK",
-        "arrival_id": "LHR",
-        "outbound_date": "2026-09-15",
-    })
+    result = search_flights.invoke(
+        {
+            "departure_id": "JFK",
+            "arrival_id": "LHR",
+            "outbound_date": "2026-09-15",
+        }
+    )
 
     assert isinstance(result, list)
     assert len(result) == 0
@@ -192,12 +214,14 @@ def test_search_flights_tool_aviationstack_format_success(mock_search):
         ]
     }
 
-    results = search_flights.invoke({
-        "departure_id": "SFO",
-        "arrival_id": "ORD",
-        "outbound_date": "2026-09-15",
-        "currency": "USD",
-    })
+    results = search_flights.invoke(
+        {
+            "departure_id": "SFO",
+            "arrival_id": "ORD",
+            "outbound_date": "2026-09-15",
+            "currency": "USD",
+        }
+    )
 
     assert isinstance(results, list)
     assert len(results) == 1
@@ -214,10 +238,12 @@ def test_search_flights_city_resolution_and_defaults(mock_search):
     mock_search.return_value = {"best_flights": []}
 
     # Test with city names and missing outbound_date
-    result = search_flights.invoke({
-        "departure_id": "mumbai",
-        "arrival_id": "pune",
-    })
+    result = search_flights.invoke(
+        {
+            "departure_id": "mumbai",
+            "arrival_id": "pune",
+        }
+    )
 
     assert isinstance(result, list)
     assert len(result) == 0
@@ -229,5 +255,3 @@ def test_search_flights_city_resolution_and_defaults(mock_search):
     # Ensure outbound_date was automatically populated
     assert call_args["outbound_date"] is not None
     assert len(call_args["outbound_date"]) == 10
-
-

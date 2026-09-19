@@ -29,7 +29,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 from typing import Any, Dict, List
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 import pytest
 from langgraph.graph.state import CompiledStateGraph
@@ -39,9 +39,7 @@ from app.graph.workflow import (
     build_workflow,
     create_workflow,
     run_workflow,
-    zico_graph,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixture: Base TravelState
@@ -117,12 +115,13 @@ async def test_workflow_flight_path_execution(base_state: TravelState) -> None:
         call_order.append("response")
         return {"final_response": "Flight EK522 is scheduled.", "active_agent": "response_agent"}
 
-    with patch("app.graph.workflow.router_node", side_effect=mock_router), \
-         patch("app.graph.workflow.flight_node", side_effect=mock_flight), \
-         patch("app.graph.workflow.research_node", side_effect=mock_research), \
-         patch("app.graph.workflow.validator_node", side_effect=mock_validator), \
-         patch("app.graph.workflow.response_node", side_effect=mock_response):
-
+    with (
+        patch("app.graph.workflow.router_node", side_effect=mock_router),
+        patch("app.graph.workflow.flight_node", side_effect=mock_flight),
+        patch("app.graph.workflow.research_node", side_effect=mock_research),
+        patch("app.graph.workflow.validator_node", side_effect=mock_validator),
+        patch("app.graph.workflow.response_node", side_effect=mock_response),
+    ):
         graph = build_workflow()
         final_state = await run_workflow(base_state, graph=graph)
 
@@ -156,7 +155,13 @@ async def test_workflow_research_path_execution(base_state: TravelState) -> None
         call_order.append("research")
         return {
             "research_status": "success",
-            "research_results": [{"title": "Visa Info", "url": "https://example.com", "content": "Passport required."}],
+            "research_results": [
+                {
+                    "title": "Visa Info",
+                    "url": "https://example.com",
+                    "content": "Passport required.",
+                }
+            ],
             "active_agent": "research_agent",
         }
 
@@ -168,12 +173,13 @@ async def test_workflow_research_path_execution(base_state: TravelState) -> None
         call_order.append("response")
         return {"final_response": "Passport required for entry.", "active_agent": "response_agent"}
 
-    with patch("app.graph.workflow.router_node", side_effect=mock_router), \
-         patch("app.graph.workflow.flight_node", side_effect=mock_flight), \
-         patch("app.graph.workflow.research_node", side_effect=mock_research), \
-         patch("app.graph.workflow.validator_node", side_effect=mock_validator), \
-         patch("app.graph.workflow.response_node", side_effect=mock_response):
-
+    with (
+        patch("app.graph.workflow.router_node", side_effect=mock_router),
+        patch("app.graph.workflow.flight_node", side_effect=mock_flight),
+        patch("app.graph.workflow.research_node", side_effect=mock_research),
+        patch("app.graph.workflow.validator_node", side_effect=mock_validator),
+        patch("app.graph.workflow.response_node", side_effect=mock_response),
+    ):
         graph = build_workflow()
         final_state = await run_workflow(base_state, graph=graph)
 
@@ -208,13 +214,17 @@ async def test_workflow_general_travel_routes_to_research(base_state: TravelStat
 
     async def mock_response(state: TravelState) -> Dict[str, Any]:
         call_order.append("response")
-        return {"final_response": "Here are general travel suggestions.", "active_agent": "response_agent"}
+        return {
+            "final_response": "Here are general travel suggestions.",
+            "active_agent": "response_agent",
+        }
 
-    with patch("app.graph.workflow.router_node", side_effect=mock_router), \
-         patch("app.graph.workflow.research_node", side_effect=mock_research), \
-         patch("app.graph.workflow.validator_node", side_effect=mock_validator), \
-         patch("app.graph.workflow.response_node", side_effect=mock_response):
-
+    with (
+        patch("app.graph.workflow.router_node", side_effect=mock_router),
+        patch("app.graph.workflow.research_node", side_effect=mock_research),
+        patch("app.graph.workflow.validator_node", side_effect=mock_validator),
+        patch("app.graph.workflow.response_node", side_effect=mock_response),
+    ):
         graph = build_workflow()
         final_state = await run_workflow(base_state, graph=graph)
 
@@ -250,14 +260,18 @@ async def test_workflow_unsupported_bypasses_tools_and_validator(base_state: Tra
 
     async def mock_response(state: TravelState) -> Dict[str, Any]:
         call_order.append("response")
-        return {"final_response": "This request is outside ZICO's travel scope.", "active_agent": "response_agent"}
+        return {
+            "final_response": "This request is outside ZICO's travel scope.",
+            "active_agent": "response_agent",
+        }
 
-    with patch("app.graph.workflow.router_node", side_effect=mock_router), \
-         patch("app.graph.workflow.flight_node", side_effect=mock_flight), \
-         patch("app.graph.workflow.research_node", side_effect=mock_research), \
-         patch("app.graph.workflow.validator_node", side_effect=mock_validator), \
-         patch("app.graph.workflow.response_node", side_effect=mock_response):
-
+    with (
+        patch("app.graph.workflow.router_node", side_effect=mock_router),
+        patch("app.graph.workflow.flight_node", side_effect=mock_flight),
+        patch("app.graph.workflow.research_node", side_effect=mock_research),
+        patch("app.graph.workflow.validator_node", side_effect=mock_validator),
+        patch("app.graph.workflow.response_node", side_effect=mock_response),
+    ):
         graph = build_workflow()
         final_state = await run_workflow(base_state, graph=graph)
 
@@ -286,9 +300,10 @@ async def test_workflow_invalid_intent_fallback(base_state: TravelState) -> None
         call_order.append("response")
         return {"final_response": "Handled by fallback response."}
 
-    with patch("app.graph.workflow.router_node", side_effect=mock_router), \
-         patch("app.graph.workflow.response_node", side_effect=mock_response):
-
+    with (
+        patch("app.graph.workflow.router_node", side_effect=mock_router),
+        patch("app.graph.workflow.response_node", side_effect=mock_response),
+    ):
         graph = build_workflow()
         final_state = await run_workflow(base_state, graph=graph)
 
@@ -309,9 +324,10 @@ async def test_workflow_missing_intent_fallback(base_state: TravelState) -> None
         call_order.append("response")
         return {"final_response": "Handled by fallback response for missing intent."}
 
-    with patch("app.graph.workflow.router_node", side_effect=mock_router), \
-         patch("app.graph.workflow.response_node", side_effect=mock_response):
-
+    with (
+        patch("app.graph.workflow.router_node", side_effect=mock_router),
+        patch("app.graph.workflow.response_node", side_effect=mock_response),
+    ):
         graph = build_workflow()
         final_state = await run_workflow(base_state, graph=graph)
 
@@ -326,7 +342,9 @@ async def test_workflow_missing_intent_fallback(base_state: TravelState) -> None
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("intent_val", ["flight", "research", "general_travel"])
-async def test_validator_always_executes_before_response(base_state: TravelState, intent_val: str) -> None:
+async def test_validator_always_executes_before_response(
+    base_state: TravelState, intent_val: str
+) -> None:
     """Verify Validator is ALWAYS executed immediately before Response on specialized paths."""
     visited: List[str] = []
 
@@ -350,12 +368,13 @@ async def test_validator_always_executes_before_response(base_state: TravelState
         visited.append("response")
         return {"final_response": "done"}
 
-    with patch("app.graph.workflow.router_node", side_effect=mock_router), \
-         patch("app.graph.workflow.flight_node", side_effect=mock_flight), \
-         patch("app.graph.workflow.research_node", side_effect=mock_research), \
-         patch("app.graph.workflow.validator_node", side_effect=mock_validator), \
-         patch("app.graph.workflow.response_node", side_effect=mock_response):
-
+    with (
+        patch("app.graph.workflow.router_node", side_effect=mock_router),
+        patch("app.graph.workflow.flight_node", side_effect=mock_flight),
+        patch("app.graph.workflow.research_node", side_effect=mock_research),
+        patch("app.graph.workflow.validator_node", side_effect=mock_validator),
+        patch("app.graph.workflow.response_node", side_effect=mock_response),
+    ):
         graph = build_workflow()
         await run_workflow(base_state, graph=graph)
 
@@ -389,11 +408,12 @@ async def test_state_propagation_and_preservation(base_state: TravelState) -> No
     async def mock_response(state: TravelState) -> Dict[str, Any]:
         return {"final_response": "Flight confirmed.", "sources": []}
 
-    with patch("app.graph.workflow.router_node", side_effect=mock_router), \
-         patch("app.graph.workflow.flight_node", side_effect=mock_flight), \
-         patch("app.graph.workflow.validator_node", side_effect=mock_validator), \
-         patch("app.graph.workflow.response_node", side_effect=mock_response):
-
+    with (
+        patch("app.graph.workflow.router_node", side_effect=mock_router),
+        patch("app.graph.workflow.flight_node", side_effect=mock_flight),
+        patch("app.graph.workflow.validator_node", side_effect=mock_validator),
+        patch("app.graph.workflow.response_node", side_effect=mock_response),
+    ):
         graph = build_workflow()
         result = await run_workflow(base_state, graph=graph)
 
@@ -418,15 +438,17 @@ async def test_state_propagation_and_preservation(base_state: TravelState) -> No
 @pytest.mark.asyncio
 async def test_workflow_node_failure_propagates_exception(base_state: TravelState) -> None:
     """Verify that node exceptions bubble up without being swallowed."""
+
     async def mock_router(state: TravelState) -> Dict[str, Any]:
         return {"intent": "flight"}
 
     async def mock_flight_failing(state: TravelState) -> Dict[str, Any]:
         raise RuntimeError("Simulated Flight Provider Transport Outage")
 
-    with patch("app.graph.workflow.router_node", side_effect=mock_router), \
-         patch("app.graph.workflow.flight_node", side_effect=mock_flight_failing):
-
+    with (
+        patch("app.graph.workflow.router_node", side_effect=mock_router),
+        patch("app.graph.workflow.flight_node", side_effect=mock_flight_failing),
+    ):
         graph = build_workflow()
         with pytest.raises(RuntimeError, match="Simulated Flight Provider Transport Outage"):
             await run_workflow(base_state, graph=graph)
@@ -439,10 +461,11 @@ async def test_workflow_node_failure_propagates_exception(base_state: TravelStat
 
 def test_zero_external_calls_during_construction() -> None:
     """Verify constructing and compiling the workflow executes zero external network/tool calls."""
-    with patch("app.tools.aviationstack.AviationStackClient") as mock_av, \
-         patch("app.tools.tavily_search.TavilySearchClient") as mock_tav, \
-         patch("app.core.llm.get_chat_model") as mock_llm:
-
+    with (
+        patch("app.tools.aviationstack.AviationStackClient") as mock_av,
+        patch("app.tools.tavily_search.TavilySearchClient") as mock_tav,
+        patch("app.core.llm.get_chat_model") as mock_llm,
+    ):
         graph = build_workflow()
         assert graph is not None
 
@@ -459,6 +482,7 @@ def test_zero_external_calls_during_construction() -> None:
 @pytest.mark.asyncio
 async def test_concurrent_workflow_invocations() -> None:
     """Verify multiple concurrent requests run with isolated state without data leakage."""
+
     async def mock_router(state: TravelState) -> Dict[str, Any]:
         # Return intent corresponding to query
         q = state.get("user_query", "")
@@ -480,16 +504,21 @@ async def test_concurrent_workflow_invocations() -> None:
     async def mock_response(state: TravelState) -> Dict[str, Any]:
         return {"final_response": f"Done for {state.get('request_id')}"}
 
-    with patch("app.graph.workflow.router_node", side_effect=mock_router), \
-         patch("app.graph.workflow.flight_node", side_effect=mock_flight), \
-         patch("app.graph.workflow.research_node", side_effect=mock_research), \
-         patch("app.graph.workflow.validator_node", side_effect=mock_validator), \
-         patch("app.graph.workflow.response_node", side_effect=mock_response):
-
+    with (
+        patch("app.graph.workflow.router_node", side_effect=mock_router),
+        patch("app.graph.workflow.flight_node", side_effect=mock_flight),
+        patch("app.graph.workflow.research_node", side_effect=mock_research),
+        patch("app.graph.workflow.validator_node", side_effect=mock_validator),
+        patch("app.graph.workflow.response_node", side_effect=mock_response),
+    ):
         graph = build_workflow()
 
-        state_a = create_initial_state(user_query="Search flight", session_id="s1", request_id="req-A")
-        state_b = create_initial_state(user_query="Search research", session_id="s2", request_id="req-B")
+        state_a = create_initial_state(
+            user_query="Search flight", session_id="s1", request_id="req-A"
+        )
+        state_b = create_initial_state(
+            user_query="Search research", session_id="s2", request_id="req-B"
+        )
 
         res_a, res_b = await asyncio.gather(
             run_workflow(state_a, graph=graph),
@@ -555,10 +584,14 @@ def test_no_duplicate_graph_nodes_on_rebuild() -> None:
 def test_import_safety_no_network_or_llm_calls() -> None:
     """Verify importing or reloading app.graph.workflow causes zero external network or model calls."""
     import importlib
-    with patch("app.tools.aviationstack.AviationStackClient") as mock_av, \
-         patch("app.tools.tavily_search.TavilySearchClient") as mock_tav, \
-         patch("app.core.llm.get_chat_model") as mock_llm:
+
+    with (
+        patch("app.tools.aviationstack.AviationStackClient") as mock_av,
+        patch("app.tools.tavily_search.TavilySearchClient") as mock_tav,
+        patch("app.core.llm.get_chat_model") as mock_llm,
+    ):
         import app.graph.workflow as wf
+
         importlib.reload(wf)
         assert not mock_av.called
         assert not mock_tav.called
@@ -600,4 +633,6 @@ def test_workflow_architecture_compliance() -> None:
         "httpx",
     ]
     for token in prohibited_tool_tokens:
-        assert token not in source, f"app.graph.workflow must not contain direct tool/LLM token: {token!r}"
+        assert token not in source, (
+            f"app.graph.workflow must not contain direct tool/LLM token: {token!r}"
+        )

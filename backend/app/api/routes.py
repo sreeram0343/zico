@@ -27,23 +27,19 @@ from __future__ import annotations
 
 import re
 import uuid
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Union
 
 from fastapi import (
     APIRouter,
-    Depends,
-    HTTPException,
-    Request,
-    Response,
     status,
 )
 from fastapi.responses import JSONResponse
 
 from app.api.schemas import (
-    APIError,
-    APIErrorCode,
     MAX_MESSAGE_LENGTH,
     MAX_SESSION_ID_LENGTH,
+    APIError,
+    APIErrorCode,
     ResponseStatus,
     Source,
     TravelRequest,
@@ -51,12 +47,10 @@ from app.api.schemas import (
 )
 from app.core.logging import get_logger
 from app.core.state import (
-    FlightResult,
-    ResearchResult,
     TravelState,
     create_initial_state,
 )
-from app.graph.workflow import run_workflow, zico_graph
+from app.graph.workflow import run_workflow
 
 logger = get_logger(__name__)
 
@@ -151,7 +145,7 @@ def _sanitize_error_text(raw_text: str) -> str:
     scrubbed = re.sub(_SECRET_REGEX_STR, "[REDACTED]", raw_text, flags=re.IGNORECASE)
     if any(
         token in scrubbed.lower()
-        for token in [("trace" + "back"), "stack trace", "file \"", "line ", "exception:"]
+        for token in [("trace" + "back"), "stack trace", 'file "', "line ", "exception:"]
     ):
         return "An internal operational error occurred."
     return scrubbed
@@ -175,14 +169,9 @@ def _extract_errors(state: Dict[str, Any]) -> List[APIError]:
             clean_msg = _sanitize_error_text(err)
             err_lower = err.lower()
             is_provider = any(
-                p in err_lower
-                for p in ["provider", "outage", "timeout", "unavailable", "network"]
+                p in err_lower for p in ["provider", "outage", "timeout", "unavailable", "network"]
             )
-            code = (
-                APIErrorCode.PROVIDER_UNAVAILABLE
-                if is_provider
-                else APIErrorCode.INTERNAL_ERROR
-            )
+            code = APIErrorCode.PROVIDER_UNAVAILABLE if is_provider else APIErrorCode.INTERNAL_ERROR
             api_errors.append(APIError(code=code, message=clean_msg))
         elif isinstance(err, dict):
             try:
@@ -272,9 +261,7 @@ async def chat_endpoint(request: TravelRequest) -> Union[TravelResponse, JSONRes
             else status.HTTP_500_INTERNAL_SERVER_ERROR
         )
         api_code = (
-            APIErrorCode.PROVIDER_UNAVAILABLE
-            if is_provider_down
-            else APIErrorCode.INTERNAL_ERROR
+            APIErrorCode.PROVIDER_UNAVAILABLE if is_provider_down else APIErrorCode.INTERNAL_ERROR
         )
         safe_message = (
             "A travel provider service is temporarily unavailable. Please try again shortly."
@@ -296,8 +283,7 @@ async def chat_endpoint(request: TravelRequest) -> Union[TravelResponse, JSONRes
 
     # 4. Map final state to public TravelResponse contract
     final_response_text: str = (
-        final_state.get("final_response")
-        or "Your travel inquiry has been processed."
+        final_state.get("final_response") or "Your travel inquiry has been processed."
     )
     final_session_id: str = final_state.get("session_id") or session_id
     response_status: ResponseStatus = _determine_response_status(final_state)

@@ -1,16 +1,16 @@
+import logging
 import os
 import re
 import time
 import uuid
-import logging
-from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional, Tuple, Union
+from datetime import datetime, timedelta
+from typing import Any, Dict, List, Optional, Tuple
 
-import certifi
-import requests
 import airportsdata
-import pycountry
+import certifi
 import dateutil.parser
+import pycountry
+import requests
 from dotenv import load_dotenv
 from langchain_core.tools import tool
 
@@ -42,11 +42,13 @@ _CACHE_TTL_SECONDS = 300  # 5 minutes cache to prevent quota exhaustion and 429 
 
 class FlightToolError(Exception):
     """Base exception for flight tool operations."""
+
     pass
 
 
 class FlightToolValidationError(ValueError):
     """Raised when flight data fails validation or has malformed timestamps/chronology."""
+
     pass
 
 
@@ -334,7 +336,10 @@ def query_aviationstack(
     api_key = API_KEY or os.getenv("AVIATIONSTACK_API_KEY", "")
     if not api_key:
         logger.warning("AviationStack API key not set in environment (AVIATIONSTACK_API_KEY).")
-        return {"data": [], "error": {"code": "missing_api_key", "message": "API key not configured"}}
+        return {
+            "data": [],
+            "error": {"code": "missing_api_key", "message": "API key not configured"},
+        }
 
     endpoint_clean = endpoint.lstrip("/")
     request_params = dict(params or {})
@@ -368,7 +373,9 @@ def query_aviationstack(
                 logger.info("Retrying query without flight_date due to plan tier restriction...")
                 retry_params = dict(request_params)
                 del retry_params["flight_date"]
-                return query_aviationstack(endpoint_clean, retry_params, use_cache=use_cache, timeout=timeout)
+                return query_aviationstack(
+                    endpoint_clean, retry_params, use_cache=use_cache, timeout=timeout
+                )
 
             # If rate limit exceeded, return cached data if available even if stale
             if err_code == "rate_limit_reached" and cache_key in _API_CACHE:
@@ -419,7 +426,9 @@ def parse_flight_to_trip_segment(
     Enriches the arrival Location with exact coordinates (lat, lng) from airportsdata.
     """
     if not isinstance(flight_data, dict):
-        raise FlightToolValidationError(f"Expected dict for flight entry, got {type(flight_data).__name__}")
+        raise FlightToolValidationError(
+            f"Expected dict for flight entry, got {type(flight_data).__name__}"
+        )
 
     dep = flight_data.get("departure") or {}
     arr = flight_data.get("arrival") or {}
@@ -436,7 +445,9 @@ def parse_flight_to_trip_segment(
     arr_time_str = arr.get("scheduled") or arr.get("estimated") or arr.get("actual")
 
     if not dep_time_str or not arr_time_str:
-        raise FlightToolValidationError("Flight entry missing required scheduled departure or arrival timestamps.")
+        raise FlightToolValidationError(
+            "Flight entry missing required scheduled departure or arrival timestamps."
+        )
 
     start_time = _parse_timestamp(dep_time_str)
     end_time = _parse_timestamp(arr_time_str)
@@ -452,7 +463,9 @@ def parse_flight_to_trip_segment(
             )
 
     airline_name = airline_info.get("name") or "Commercial Airline"
-    flight_iata = flight_info.get("iata") or flight_info.get("number") or f"FL-{uuid.uuid4().hex[:4].upper()}"
+    flight_iata = (
+        flight_info.get("iata") or flight_info.get("number") or f"FL-{uuid.uuid4().hex[:4].upper()}"
+    )
 
     # Enrich arrival Location with geographic coordinates from airportsdata
     _ensure_airport_databases_loaded()
@@ -649,7 +662,11 @@ def track_flight_disruption(flight_number: str) -> Optional[Dict[str, Any]]:
     reason = (
         f"Flight {flight_number} is cancelled."
         if is_cancelled
-        else (f"Flight {flight_number} is delayed by {max_delay} minutes." if is_delayed else f"Flight {flight_number} is diverted.")
+        else (
+            f"Flight {flight_number} is delayed by {max_delay} minutes."
+            if is_delayed
+            else f"Flight {flight_number} is diverted."
+        )
     )
 
     return {

@@ -16,13 +16,11 @@ from unittest.mock import patch
 import pytest
 
 from app.tools.location import (
-    AirportCandidate,
     LocationResolutionError,
     LocationResolver,
     ResolvedLocation,
     resolve_location,
 )
-
 
 # ---------------------------------------------------------------------------
 # Test 26: Empty Query Validation

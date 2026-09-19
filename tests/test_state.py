@@ -12,7 +12,6 @@ Covers:
 - Test 8: Partial state updates for LangGraph node execution
 """
 
-import pytest
 from app.core.state import (
     FlightResult,
     ResearchResult,

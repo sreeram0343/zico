@@ -21,6 +21,7 @@ Covers:
 
 import json
 from typing import Any, Dict
+
 import httpx
 import pytest
 
@@ -298,7 +299,9 @@ async def test_secret_protection(caplog: pytest.LogCaptureFixture):
         return httpx.Response(500, text="Internal Server Error")
 
     with caplog.at_level("DEBUG"):
-        async with AviationStackClient(api_key=secret_key, transport=httpx.MockTransport(handler)) as client:
+        async with AviationStackClient(
+            api_key=secret_key, transport=httpx.MockTransport(handler)
+        ) as client:
             with pytest.raises(AviationStackHTTPError) as exc_info:
                 await client.get_flights()
 

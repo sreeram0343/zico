@@ -3,8 +3,10 @@ Unit tests for database models and redis connection helper.
 """
 
 from unittest.mock import AsyncMock, patch
+
 import pytest
-from app.db.models import AuditLog, Base, Trip
+
+from app.db.models import AuditLog, Trip
 from app.db.redis import close_redis, get_redis, init_redis
 
 
@@ -35,9 +37,10 @@ def test_audit_log_model_instantiation():
 @pytest.mark.asyncio
 async def test_redis_initialization():
     """Verify Redis client pool initialization and cleanup."""
-    with patch("redis.asyncio.ConnectionPool.from_url") as mock_pool_factory, \
-         patch("redis.asyncio.Redis") as mock_redis_cls:
-
+    with (
+        patch("redis.asyncio.ConnectionPool.from_url") as mock_pool_factory,
+        patch("redis.asyncio.Redis") as mock_redis_cls,
+    ):
         mock_pool = AsyncMock()
         mock_pool_factory.return_value = mock_pool
 
@@ -58,5 +61,7 @@ async def test_redis_initialization():
         # Cleanup
         await close_redis()
         assert mock_client.close.await_count == 1 or getattr(mock_client, "aclose").await_count == 1
-        assert mock_pool.disconnect.await_count == 1 or getattr(mock_pool, "adisconnect").await_count == 1
-
+        assert (
+            mock_pool.disconnect.await_count == 1
+            or getattr(mock_pool, "adisconnect").await_count == 1
+        )

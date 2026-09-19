@@ -13,23 +13,20 @@ Verifies:
 from __future__ import annotations
 
 import json
-import logging
-from typing import Any, Dict, List
+from typing import List
 from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
 
-from app.agents.flight_agent import FlightAgent, run_flight_agent
+from app.agents.flight_agent import run_flight_agent
 from app.core.state import TravelState, create_initial_state
 from app.tools.aviationstack import (
     AirportDetails,
     AviationStackAPIError,
-    AviationStackNetworkError,
     AviationStackResponse,
     AviationStackTimeoutError,
     NormalizedFlight,
 )
-from app.tools.location import LocationResolver, ResolvedLocation
-
 
 # ---------------------------------------------------------------------------
 # Test Fixtures & Helpers
@@ -219,7 +216,10 @@ async def test_unresolved_destination() -> None:
 
     assert update["flight_status"] == "error"
     assert not client.get_flights.called
-    assert any("destination 'NonexistentCityABC' could not be resolved (not_found)" in err for err in update["errors"])
+    assert any(
+        "destination 'NonexistentCityABC' could not be resolved (not_found)" in err
+        for err in update["errors"]
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -245,7 +245,10 @@ async def test_ambiguous_location() -> None:
 
     assert update["flight_status"] == "error"
     assert not client.get_flights.called
-    assert any("origin 'Springfield' is ambiguous and matches multiple airports" in err for err in update["errors"])
+    assert any(
+        "origin 'Springfield' is ambiguous and matches multiple airports" in err
+        for err in update["errors"]
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -305,7 +308,9 @@ async def test_aviationstack_no_results() -> None:
 async def test_aviationstack_failure() -> None:
     """Verify provider API errors set flight_status='error' and preserve error details."""
     client = AsyncMock()
-    client.get_flights.side_effect = AviationStackAPIError("usage_limit_reached", "Account quota reached")
+    client.get_flights.side_effect = AviationStackAPIError(
+        "usage_limit_reached", "Account quota reached"
+    )
 
     state: TravelState = create_initial_state(
         user_query="Check flight EK522",
@@ -330,7 +335,9 @@ async def test_aviationstack_failure() -> None:
 async def test_timeout() -> None:
     """Verify request timeout is caught and logged cleanly into state errors."""
     client = AsyncMock()
-    client.get_flights.side_effect = AviationStackTimeoutError("AviationStack request timed out after 10s")
+    client.get_flights.side_effect = AviationStackTimeoutError(
+        "AviationStack request timed out after 10s"
+    )
 
     state: TravelState = create_initial_state(
         user_query="Check flight EK522",
