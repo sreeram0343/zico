@@ -26,7 +26,7 @@ elevenlabs>=0.2.27
 
 # HTTP Client & Utilities
 httpx>=0.27.0
-requests>=2.31.0
+requests>=2.34.2
 certifi>=2024.2.2
 serpapi>=0.1.4
 python-dotenv>=1.0.1
