@@ -31,6 +31,7 @@ from typing import Any, Dict, List, Union
 
 from fastapi import (
     APIRouter,
+    Response,
     status,
 )
 from fastapi.responses import JSONResponse
@@ -46,6 +47,11 @@ from app.api.schemas import (
     TravelResponse,
 )
 from app.core.logging import get_logger
+from app.core.request_context import (
+    get_request_id,
+    get_session_id,
+    set_request_context,
+)
 from app.core.state import (
     TravelState,
     create_initial_state,
@@ -209,19 +215,29 @@ def _extract_errors(state: Dict[str, Any]) -> List[APIError]:
         503: {"description": "External travel data provider service unavailable."},
     },
 )
-async def chat_endpoint(request: TravelRequest) -> Union[TravelResponse, JSONResponse]:
+async def chat_endpoint(
+    request: TravelRequest,
+    response: Response = Response(),
+) -> Union[TravelResponse, JSONResponse]:
     """
     FastAPI endpoint handler for traveler queries and commands.
 
     Args:
         request: Validated incoming TravelRequest model.
+        response: FastAPI Response object for setting response headers.
 
     Returns:
         TravelResponse payload or structured JSON error response.
     """
     # 1. Establish session context and unique trace identifier
-    session_id: str = request.session_id or f"sess_{uuid.uuid4().hex[:12]}"
-    request_id: str = f"req_{uuid.uuid4().hex[:12]}"
+    request_id: str = get_request_id() or f"req_{uuid.uuid4().hex[:12]}"
+    session_id: str = request.session_id or get_session_id() or f"sess_{uuid.uuid4().hex[:12]}"
+
+    # Synchronize resolved IDs with active execution context
+    set_request_context(request_id=request_id, session_id=session_id)
+
+    if response is not None:
+        response.headers["X-Request-ID"] = request_id
 
     logger.info(
         "Received ZICO chat request (request_id=%s, session_id=%s)",
@@ -279,6 +295,7 @@ async def chat_endpoint(request: TravelRequest) -> Union[TravelResponse, JSONRes
         return JSONResponse(
             status_code=http_status,
             content=error_response.model_dump(mode="json"),
+            headers={"X-Request-ID": request_id},
         )
 
     # 4. Map final state to public TravelResponse contract

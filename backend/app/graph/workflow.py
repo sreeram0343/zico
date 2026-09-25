@@ -43,12 +43,19 @@ Architectural Principles:
 
 from __future__ import annotations
 
+import time
+import uuid
 from typing import Optional
 
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 
 from app.core.logging import get_logger
+from app.core.request_context import (
+    get_request_id,
+    get_session_id,
+    set_request_context,
+)
 from app.core.state import TravelState
 from app.graph.edges import route_after_router
 from app.graph.nodes import (
@@ -149,6 +156,41 @@ async def run_workflow(
     Returns:
         Updated TravelState after complete graph execution to END.
     """
+    req_id = state.get("request_id") or get_request_id() or f"req_{uuid.uuid4().hex[:12]}"
+    sess_id = state.get("session_id") or get_session_id() or f"sess_{uuid.uuid4().hex[:12]}"
+    set_request_context(request_id=req_id, session_id=sess_id)
+
+    workflow_name = "zico_workflow"
     active_graph = graph if graph is not None else zico_graph
-    result = await active_graph.ainvoke(state)
-    return result
+
+    start_time = time.perf_counter()
+    logger.info(
+        "workflow_started workflow=%s request_id=%s session_id=%s",
+        workflow_name,
+        req_id,
+        sess_id,
+    )
+
+    try:
+        result = await active_graph.ainvoke(state)
+        duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
+        logger.info(
+            "workflow_completed workflow=%s request_id=%s session_id=%s duration_ms=%.2f",
+            workflow_name,
+            req_id,
+            sess_id,
+            duration_ms,
+        )
+        return result
+    except Exception as exc:
+        duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
+        exc_type = type(exc).__name__
+        logger.error(
+            "workflow_failed workflow=%s request_id=%s session_id=%s duration_ms=%.2f error_type=%s",
+            workflow_name,
+            req_id,
+            sess_id,
+            duration_ms,
+            exc_type,
+        )
+        raise
