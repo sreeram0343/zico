@@ -2,23 +2,28 @@
 Intent Router Agent for ZICO.
 
 This module provides the first AI-driven agent node in the ZICO travel operations
-architecture. It inspects incoming user queries and classifies them into one of four
-standardized operational intents:
-    - 'flight': Aviation, flight status, schedules, delays, and airport operations.
-    - 'research': Factual travel research, live policies, visa rules, and restrictions.
-    - 'general_travel': Broad itinerary planning, packing lists, and general travel tips.
-    - 'unsupported': Requests outside the scope of travel and aviation operations.
+architecture. It inspects incoming user queries and classifies them into structured
+operational intents:
+    - 'FLIGHT_SEARCH' / 'flight': Finding flight tickets, schedules, routes, airlines, options.
+    - 'FLIGHT_STATUS': Live tracking, status, delay checks, gate/terminal inquiries.
+    - 'HOTEL_SEARCH': Finding hotels, resorts, homestays, accommodations, room rates, and budgets.
+    - 'DESTINATION_RESEARCH' / 'research': Factual travel research, attractions, guides, advisories.
+    - 'ITINERARY_PLANNING': Multi-day trip planning and schedules.
+    - 'TRAVEL_POLICY': Baggage allowances, visa rules, EU261 compensation, passport validity.
+    - 'LOCATION_QUERY': Geographic coordinates, nearest airports, transit distances.
+    - 'GENERAL_TRAVEL' / 'general_travel': Broad travel tips, packing advice, and suggestions.
+    - 'UNSUPPORTED' / 'unsupported': Requests outside travel, aviation, or trip operations.
 
 Design Principles:
     - Deterministic & Structured: Uses structured output via `RouterDecision`.
-    - No Business/Tool Logic: Strictly classifies requests; never calls tools.
-    - Centralized LLM: Instantiates models solely through `app.core.llm.get_chat_model`.
-    - Safe Error Handling: Falls back to 'unsupported' and logs errors without crashing.
+    - No Hallucination: Never invents destinations, origins, or flight routes for hotel/research queries.
+    - Safe Error Handling: Falls back to 'unsupported' upon invalid intents without crashing.
     - LangGraph Compatible: Consumes `TravelState` and returns partial state updates.
 """
 
 from __future__ import annotations
 
+import re
 from typing import Any, Dict, Literal, Optional, Set
 
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -30,25 +35,60 @@ from app.core.state import TravelState
 
 logger = get_logger(__name__)
 
-# The four authoritative operational intents supported by ZICO
-AllowedIntent = Literal["flight", "research", "general_travel", "unsupported"]
-ALLOWED_INTENTS: Set[str] = {"flight", "research", "general_travel", "unsupported"}
+# Authoritative operational intents supported by ZICO
+AllowedIntent = Literal[
+    "FLIGHT_SEARCH",
+    "FLIGHT_STATUS",
+    "HOTEL_SEARCH",
+    "DESTINATION_RESEARCH",
+    "ITINERARY_PLANNING",
+    "TRAVEL_POLICY",
+    "LOCATION_QUERY",
+    "GENERAL_TRAVEL",
+    "UNSUPPORTED",
+    # Legacy lowercase variants
+    "flight",
+    "research",
+    "general_travel",
+    "unsupported",
+]
+
+ALLOWED_INTENTS: Set[str] = {
+    "FLIGHT_SEARCH",
+    "FLIGHT_STATUS",
+    "HOTEL_SEARCH",
+    "DESTINATION_RESEARCH",
+    "ITINERARY_PLANNING",
+    "TRAVEL_POLICY",
+    "LOCATION_QUERY",
+    "GENERAL_TRAVEL",
+    "UNSUPPORTED",
+    "flight",
+    "research",
+    "general_travel",
+    "unsupported",
+}
 
 # Conservative, deterministic system prompt for intent routing
 ROUTER_SYSTEM_PROMPT = """You are ZICO's Travel Intent Router Agent.
-Your role is to classify the user's travel request into exactly one operational category.
+Your role is to classify the user's travel request into exactly one operational category and extract relevant travel parameters.
 
 Allowed Categories:
-1. "flight": Requests concerning flights, aviation status, schedules, delays, routes, airlines, or airport flight tracking (e.g. "Check flight EK522", "Is my flight delayed?", "Find flights from TRV to DXB", "Status of flight AI123").
-2. "research": Requests requiring current factual travel research, government regulations, visa policies, travel advisories, entry restrictions, or airline baggage allowances (e.g. "What are the visa requirements for Germany?", "Is Dubai airport open today?", "What is the baggage limit for Emirates?").
-3. "general_travel": Broad trip planning, packing advice, general destination suggestions, or multi-day trip ideas not requiring specific flight status or live regulatory policy research (e.g. "Help me plan a 7-day trip to Paris", "What should I pack for Dubai?").
-4. "unsupported": Requests that clearly fall outside the domain of travel, aviation, or trip operations (e.g. writing software, math problems, medical diagnoses, general knowledge outside travel).
+1. "HOTEL_SEARCH": Searching for hotels, resorts, hostels, homestays, accommodations, room rates, or lodging under a budget (e.g. "Hotels in Pune under 10k", "Where to stay in Paris", "Luxury resort in Goa"). MUST NEVER be classified as flight.
+2. "FLIGHT_SEARCH": Searching for flight tickets, airline schedules, flight options, or booking routes between cities (e.g. "Find flights from Pune to Dubai tomorrow", "Flights to London").
+3. "FLIGHT_STATUS": Real-time status, tracking, delays, gates, or terminal info for a specific flight (e.g. "Status of flight EK522", "Is my flight delayed?").
+4. "DESTINATION_RESEARCH": Attractions, sightseeing, top places to visit, local customs, food recommendations, or city guides (e.g. "What are the best places to visit in Pune?", "Things to do in Tokyo").
+5. "ITINERARY_PLANNING": Multi-day itineraries, day-by-day travel schedules (e.g. "Plan a 3-day trip to Bangalore").
+6. "TRAVEL_POLICY": Baggage limits, visa regulations, cancellation rules, EU261 compensation, passport rules (e.g. "What is the baggage limit for Emirates?", "Do I need a visa for Japan?").
+7. "LOCATION_QUERY": Geographic info, nearest airports, distance, transit between places (e.g. "What is the nearest airport to Munnar?").
+8. "GENERAL_TRAVEL": Broad travel tips, packing advice, or general travel planning.
+9. "UNSUPPORTED": Inquiries outside travel operations (software coding, math, medical, non-travel trivia).
 
-Guidelines:
-- Return exactly one category from the four allowed values.
-- If a request requires live or external policy information (like visa rules), choose "research".
-- Do NOT perform or execute any operations or tools.
-- Return output strictly conforming to the required schema."""
+Extraction Guidelines:
+- location: Target city or region (e.g. "Pune" for "Hotels in Pune under 10k").
+- budget: Budget constraint if specified (e.g. "10000 INR").
+- origin / destination: Departure and arrival cities/airports for flight queries ONLY. Do NOT infer or invent missing origin/destination for hotel or general queries.
+- Do NOT execute any tools. Return structured schema conforming to RouterDecision."""
 
 
 # ---------------------------------------------------------------------------
@@ -65,6 +105,316 @@ class RouterDecision(BaseModel):
     confidence: Optional[float] = Field(
         default=1.0,
         description="Heuristic model assessment of intent confidence (0.0 to 1.0).",
+    )
+    location: Optional[str] = Field(
+        default=None,
+        description="Target city, region, or country (e.g. 'Pune').",
+    )
+    origin: Optional[str] = Field(
+        default=None,
+        description="Departure location or airport for flight queries.",
+    )
+    destination: Optional[str] = Field(
+        default=None,
+        description="Arrival location or airport for flight queries.",
+    )
+    budget: Optional[str] = Field(
+        default=None,
+        description="Budget constraint (e.g. '10000 INR', 'under 10k').",
+    )
+    dates: Optional[str] = Field(
+        default=None,
+        description="Travel dates or timeframe if explicitly specified.",
+    )
+    reasoning: Optional[str] = Field(
+        default=None,
+        description="Short rationale explaining the routing classification.",
+    )
+
+
+# ---------------------------------------------------------------------------
+# Heuristic Fallback Classifier
+# ---------------------------------------------------------------------------
+
+
+def classify_intent_heuristically(query: str) -> RouterDecision:
+    """
+    Deterministic intent classification and entity extraction fallback.
+    Accurately identifies HOTEL_SEARCH, FLIGHT_SEARCH, FLIGHT_STATUS,
+    DESTINATION_RESEARCH, ITINERARY_PLANNING, TRAVEL_POLICY, LOCATION_QUERY,
+    GENERAL_TRAVEL, and UNSUPPORTED.
+    """
+    text = query.strip()
+    lower = text.lower()
+
+    # 1. Unsupported non-travel categories
+    unsupported_patterns = [
+        r"\b(?:python|javascript|typescript|c\+\+|html|css|sql|function|code|compile|bug|syntax)\b",
+        r"\b(?:calculate|solve|equation|derivative|integral|math problem)\b",
+        r"\b(?:symptoms|diagnosis|prescription|disease|doctor|medical advice)\b",
+        r"\b(?:write an essay|write a poem|homework)\b",
+    ]
+    if any(re.search(p, lower) for p in unsupported_patterns):
+        return RouterDecision(intent="UNSUPPORTED", confidence=1.0)
+
+    # 2. Hotel Search (e.g. "Hotels in Pune under 10k", "Stay in Goa", "Resort in Manali")
+    hotel_keywords = [
+        "hotel",
+        "hotels",
+        "resort",
+        "resorts",
+        "hostel",
+        "hostels",
+        "homestay",
+        "homestays",
+        "stay in",
+        "stays in",
+        "accommodation",
+        "accommodations",
+        "motel",
+        "motels",
+        "lodging",
+        "room in",
+        "rooms in",
+        "where to stay",
+    ]
+    if any(k in lower for k in hotel_keywords):
+        loc = None
+        loc_match = re.search(
+            r"(?:hotels?|resorts?|hostels?|stays?|accommodations?|rooms?|lodging)\s+(?:in|at|near|around)\s+([a-zA-Z\s]+?)(?:\s+(?:under|below|within|budget|around|\b\d)|$)",
+            lower,
+        )
+        if loc_match:
+            loc = loc_match.group(1).strip().title()
+        else:
+            known_cities = [
+                "pune",
+                "mumbai",
+                "delhi",
+                "bangalore",
+                "bengaluru",
+                "goa",
+                "hyderabad",
+                "chennai",
+                "kolkata",
+                "kochi",
+                "cochin",
+                "jaipur",
+                "manali",
+                "shimla",
+                "paris",
+                "dubai",
+                "london",
+                "tokyo",
+                "singapore",
+                "new york",
+                "munnar",
+            ]
+            for c in known_cities:
+                if c in lower:
+                    loc = c.title()
+                    break
+
+        budget = None
+        budget_match = re.search(
+            r"(?:under|below|within|budget(?:\s+of)?|max(?:\s+of)?|<=?)\s*(?:rs\.?|inr|\$|usd|eur|€)?\s*(\d+(?:,\d+)*(?:\.\d+)?)\s*(k|l|lakh|thousand)?\s*(inr|usd|eur|dollars|rupees|rs\.?)?",
+            lower,
+        )
+        if budget_match:
+            raw_num_str = budget_match.group(1).replace(",", "")
+            multiplier = (budget_match.group(2) or "").lower()
+            curr = (budget_match.group(3) or "").upper()
+            if not curr:
+                curr = (
+                    "INR"
+                    if (
+                        "rs" in lower
+                        or "inr" in lower
+                        or "k" in multiplier
+                        or "lakh" in multiplier
+                        or not any(x in lower for x in ["$", "usd", "eur"])
+                    )
+                    else "USD"
+                )
+            try:
+                num = float(raw_num_str)
+                if multiplier == "k":
+                    num *= 1000
+                elif multiplier in ("l", "lakh"):
+                    num *= 100000
+                elif multiplier == "thousand":
+                    num *= 1000
+                budget = f"{int(num)} {curr}"
+            except ValueError:
+                budget = budget_match.group(0).strip()
+
+        return RouterDecision(
+            intent="HOTEL_SEARCH",
+            location=loc,
+            budget=budget,
+            confidence=1.0,
+            reasoning=f"Identified hotel accommodation request for {loc or 'specified location'}",
+        )
+
+    # 3. Flight Status (e.g. "Status of flight EK522", "Is my flight delayed?")
+    flight_status_indicators = [
+        "status of flight",
+        "flight status",
+        "check flight",
+        "is my flight delayed",
+        "flight delay",
+        "track flight",
+        "flight tracking",
+    ]
+    flight_code_match = re.search(r"\b([a-zA-Z0-9]{2,3})\s*(\d{2,4})\b", text)
+    if any(k in lower for k in flight_status_indicators) or (
+        flight_code_match and ("status" in lower or "delay" in lower)
+    ):
+        return RouterDecision(
+            intent="FLIGHT_STATUS",
+            confidence=1.0,
+            reasoning="Identified flight status / tracking inquiry",
+        )
+
+    # 4. Flight Search (e.g. "Find flights from Pune to Dubai tomorrow")
+    flight_search_indicators = [
+        "flight",
+        "flights",
+        "fly to",
+        "plane to",
+        "airfare",
+        "airline tickets",
+    ]
+    if any(k in lower for k in flight_search_indicators):
+        origin, destination = None, None
+        route_match = re.search(
+            r"from\s+([a-zA-Z\s]+?)\s+to\s+([a-zA-Z\s]+?)(?:\s+(?:on|next|tomorrow|this|\b\d)|$)",
+            lower,
+        )
+        if route_match:
+            origin = route_match.group(1).strip().title()
+            destination = route_match.group(2).strip().title()
+
+        dates = None
+        if "tomorrow" in lower:
+            dates = "tomorrow"
+        elif "next friday" in lower:
+            dates = "next Friday"
+        elif "next week" in lower:
+            dates = "next week"
+
+        return RouterDecision(
+            intent="FLIGHT_SEARCH",
+            origin=origin,
+            destination=destination,
+            dates=dates,
+            confidence=1.0,
+            reasoning="Identified flight search inquiry",
+        )
+
+    # 5. Destination Research (e.g. "What are the best places to visit in Pune?")
+    research_indicators = [
+        "places to visit",
+        "things to do",
+        "attractions",
+        "sightseeing",
+        "visit in",
+        "must see in",
+        "best spots in",
+        "travel guide",
+        "what to see",
+    ]
+    if any(k in lower for k in research_indicators):
+        loc = None
+        loc_match = re.search(
+            r"(?:in|at|near|around)\s+([a-zA-Z\s]+?)(?:\s+(?:for|during|with)|$)", lower
+        )
+        if loc_match:
+            loc = loc_match.group(1).strip().title()
+        else:
+            known_cities = [
+                "pune",
+                "mumbai",
+                "delhi",
+                "bangalore",
+                "bengaluru",
+                "goa",
+                "paris",
+                "dubai",
+                "london",
+                "tokyo",
+                "munnar",
+                "jaipur",
+            ]
+            for c in known_cities:
+                if c in lower:
+                    loc = c.title()
+                    break
+
+        return RouterDecision(
+            intent="DESTINATION_RESEARCH",
+            location=loc,
+            confidence=1.0,
+            reasoning=f"Identified destination research inquiry for {loc or 'specified destination'}",
+        )
+
+    # 6. Travel Policy (e.g. baggage, visa, cancellation)
+    policy_indicators = [
+        "baggage",
+        "luggage",
+        "visa",
+        "passport",
+        "policy",
+        "cancellation",
+        "eu261",
+        "refund",
+        "regulations",
+        "duty of care",
+    ]
+    if any(k in lower for k in policy_indicators):
+        return RouterDecision(
+            intent="TRAVEL_POLICY",
+            confidence=1.0,
+            reasoning="Identified travel policy or regulatory inquiry",
+        )
+
+    # 7. Itinerary Planning
+    itinerary_indicators = [
+        "itinerary",
+        "plan a trip",
+        "plan my trip",
+        "day trip",
+        "3-day",
+        "5-day",
+        "7-day",
+    ]
+    if any(k in lower for k in itinerary_indicators):
+        return RouterDecision(
+            intent="ITINERARY_PLANNING",
+            confidence=1.0,
+            reasoning="Identified itinerary planning inquiry",
+        )
+
+    # 8. Location Query
+    location_indicators = [
+        "nearest airport",
+        "how far",
+        "distance between",
+        "where is",
+        "closest airport",
+    ]
+    if any(k in lower for k in location_indicators):
+        return RouterDecision(
+            intent="LOCATION_QUERY",
+            confidence=1.0,
+            reasoning="Identified geographic / location inquiry",
+        )
+
+    # 9. General Travel
+    return RouterDecision(
+        intent="GENERAL_TRAVEL",
+        confidence=0.8,
+        reasoning="General travel inquiry",
     )
 
 
@@ -217,11 +567,21 @@ class RouterAgent:
         logger.info(
             "Router selected intent: %s (confidence=%s)", decision.intent, decision.confidence
         )
-        return {
+
+        res: Dict[str, Any] = {
             "intent": decision.intent,
             "intent_confidence": decision.confidence,
             "active_agent": "router_agent",
         }
+        if decision.location:
+            res["location"] = decision.location
+        if decision.budget:
+            res["budget"] = decision.budget
+        if decision.origin:
+            res["origin"] = decision.origin
+        if decision.destination:
+            res["destination"] = decision.destination
+        return res
 
     async def aroute(self, state: TravelState) -> Dict[str, Any]:
         """
@@ -334,11 +694,21 @@ class RouterAgent:
         logger.info(
             "Router selected intent: %s (confidence=%s)", decision.intent, decision.confidence
         )
-        return {
+
+        res: Dict[str, Any] = {
             "intent": decision.intent,
             "intent_confidence": decision.confidence,
             "active_agent": "router_agent",
         }
+        if decision.location:
+            res["location"] = decision.location
+        if decision.budget:
+            res["budget"] = decision.budget
+        if decision.origin:
+            res["origin"] = decision.origin
+        if decision.destination:
+            res["destination"] = decision.destination
+        return res
 
 
 # ---------------------------------------------------------------------------

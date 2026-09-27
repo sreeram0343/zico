@@ -21,6 +21,7 @@ KNOWN_GRAPH_NODES = {
     "input_node",
     "supervisor_node",
     "flight_search_worker",
+    "research_worker",
     "policy_rag_worker",
     "disruption_worker",
     "booking_approval_node",
@@ -306,15 +307,15 @@ async def websocket_stream_endpoint(websocket: WebSocket, trip_id: str):
                                                 else str(m.content)
                                             )
 
-                                # Also emit node_update for legacy UI/test compatibility
+                                # Also emit node_update for state synchronization without fake message content
                                 await _safe_send_json(
                                     websocket,
                                     {
                                         "type": "node_update",
                                         "node": node_candidate,
                                         "output": _safe_serialize(node_output),
-                                        "content": msg_snippet or "Node completed",
-                                        "message": msg_snippet or "Node completed",
+                                        "content": msg_snippet,
+                                        "message": msg_snippet,
                                     },
                                 )
                             except Exception as state_exc:

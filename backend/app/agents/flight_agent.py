@@ -225,7 +225,7 @@ class FlightAgent:
 
         # 1. Intent Validation Guard
         intent = state.get("intent")
-        if intent != "flight":
+        if intent not in ("flight", "FLIGHT_SEARCH", "FLIGHT_STATUS"):
             logger.warning("Flight Agent invoked with non-flight intent %r", intent)
             return {
                 "flight_status": "error",

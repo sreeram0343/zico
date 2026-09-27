@@ -78,3 +78,20 @@ export interface StreamEvent {
   itinerary?: TripSegment[];
   sources?: SourceCitation[];
 }
+
+export interface FlightOption {
+  id?: string;
+  airline: string;
+  flightNumber?: string;
+  departure: string;
+  departureAirport: string;
+  arrival: string;
+  arrivalAirport: string;
+  duration: string;
+  stops?: string;
+  price?: string;
+  currency?: string;
+  aircraft?: string;
+  baggage?: string;
+  cabin?: string;
+}

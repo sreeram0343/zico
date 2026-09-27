@@ -72,6 +72,8 @@ class TravelState(TypedDict, total=False):
     # -----------------------------------------------------------------------
     origin: Optional[str]
     destination: Optional[str]
+    location: Optional[str]
+    budget: Optional[str]
     departure_date: Optional[str]
     return_date: Optional[str]
     passengers: Optional[int]
@@ -158,6 +160,8 @@ def create_initial_state(
         "intent": None,
         "intent_confidence": None,
         # Travel Parameters
+        "location": None,
+        "budget": None,
         "origin": None,
         "destination": None,
         "departure_date": None,

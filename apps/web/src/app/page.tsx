@@ -1,50 +1,161 @@
 'use client';
 
 import React, { useState } from 'react';
+import { ZicoSidebar, NavItemKey } from '@/components/ZicoSidebar';
+import { HeroSection } from '@/components/HeroSection';
+import { QuickActionBar } from '@/components/QuickActionBar';
+import { TravelAssistantCard } from '@/components/TravelAssistantCard';
+import { PopularQuestionsCard } from '@/components/PopularQuestionsCard';
+import { RecentConversationsCard } from '@/components/RecentConversationsCard';
+import { ThemeToggle } from '@/components/ThemeToggle';
+import { ProfileMenu } from '@/components/ProfileMenu';
 import { Timeline } from '@/components/Timeline';
-import { Compass, Sparkles, Shield, Activity, RefreshCw } from 'lucide-react';
+import { Menu, PanelRight, X } from 'lucide-react';
 
 export default function Home() {
-  const [tripId, setTripId] = useState<string>('trip_demo_global_01');
+  const [tripId] = useState<string>('trip_demo_global_01');
+  const [activeTab, setActiveTab] = useState<NavItemKey>('chat');
+  const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
+  const [isMobileRightPanelOpen, setIsMobileRightPanelOpen] = useState(false);
+
+  // External prompt triggered by clicking quick actions, popular questions, or recent conversations
+  const [externalPrompt, setExternalPrompt] = useState<{
+    text: string;
+    timestamp: number;
+  } | null>(null);
+
+  const handleSelectPrompt = (promptText: string) => {
+    setExternalPrompt({ text: promptText, timestamp: Date.now() });
+    setIsMobileRightPanelOpen(false);
+  };
 
   return (
-    <main className="min-h-screen bg-slate-950 text-slate-100 flex flex-col">
-      {/* Top Navigation Bar */}
-      <header className="border-b border-slate-800/80 bg-slate-900/50 backdrop-blur sticky top-0 z-50">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="p-2 rounded-xl bg-blue-600 text-white shadow-lg shadow-blue-600/30">
-              <Compass className="w-5 h-5" />
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <span className="font-bold text-base tracking-tight text-white">ZICO</span>
-                <span className="text-[10px] uppercase font-mono px-2 py-0.5 rounded bg-blue-950 text-blue-400 border border-blue-800">
-                  Phase 2 Operations
-                </span>
-              </div>
-              <p className="text-xs text-slate-400">Intelligent Multi-Agent Travel Orchestration</p>
-            </div>
-          </div>
+    <div className="min-h-screen bg-[#FAFAF7] text-[#101828] flex flex-col antialiased">
+      {/* Top Header Bar for Mobile/Tablet controls & Top Right Desktop controls */}
+      <header className="bg-white border-b border-[#E5E7EB] sticky top-0 z-40 px-4 sm:px-6 h-16 flex items-center justify-between">
+        {/* Mobile Left Sidebar Toggle */}
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => setIsMobileNavOpen(true)}
+            className="lg:hidden p-2 rounded-xl border border-[#E5E7EB] text-[#475467] hover:bg-[#FFFDF7] hover:text-[#101828] transition-colors"
+            aria-label="Open sidebar menu"
+          >
+            <Menu className="w-5 h-5" />
+          </button>
 
-          <div className="flex items-center gap-4 text-xs">
-            <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-800/80 border border-slate-700/60 text-slate-300">
-              <Shield className="w-3.5 h-3.5 text-emerald-400" />
-              <span>HITL Security Active</span>
-            </div>
-
-            <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-800/80 border border-slate-700/60 text-slate-300">
-              <Activity className="w-3.5 h-3.5 text-blue-400" />
-              <span className="font-mono">Trip: {tripId}</span>
-            </div>
+          {/* Mobile Logo display */}
+          <div className="flex items-center gap-2 lg:hidden">
+            <span className="font-extrabold text-xl tracking-tight text-[#101828]">ZICO</span>
           </div>
+        </div>
+
+        {/* Top Right Controls: Theme Toggle & Profile Menu */}
+        <div className="flex items-center gap-3 sm:gap-4 ml-auto">
+          {/* Mobile Right Sidebar Toggle */}
+          <button
+            onClick={() => setIsMobileRightPanelOpen(true)}
+            className="xl:hidden p-2 rounded-full border border-[#E5E7EB] text-[#475467] hover:bg-[#FFFDF7] transition-colors"
+            aria-label="Open assistant panel"
+            title="Assistant panel"
+          >
+            <PanelRight className="w-4 h-4" />
+          </button>
+
+          <ThemeToggle />
+          <ProfileMenu name="John Doe" initials="JD" />
         </div>
       </header>
 
-      {/* Main App Container */}
-      <div className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8">
-        <Timeline tripId={tripId} />
+      {/* Main 3-Column Layout */}
+      <div className="flex-1 flex max-w-[1600px] w-full mx-auto relative overflow-hidden">
+        {/* 1. Left Sidebar (Desktop) */}
+        <div className="hidden lg:block shrink-0 h-[calc(100vh-4rem)] sticky top-16">
+          <ZicoSidebar
+            activeTab={activeTab}
+            onSelectTab={(tab) => {
+              setActiveTab(tab);
+              if (tab === 'plan') {
+                handleSelectPrompt('Help me plan a 3-day trip itinerary');
+              } else if (tab === 'flights') {
+                handleSelectPrompt('Find flights from Pune to Dubai tomorrow');
+              } else if (tab === 'destinations') {
+                handleSelectPrompt('What are the best places to visit in Munnar?');
+              } else if (tab === 'research') {
+                handleSelectPrompt('Check baggage policies for international flights');
+              }
+            }}
+          />
+        </div>
+
+        {/* Left Sidebar (Mobile Drawer) */}
+        {isMobileNavOpen && (
+          <div className="fixed inset-0 z-50 flex lg:hidden">
+            <div
+              className="fixed inset-0 bg-black/30 backdrop-blur-sm"
+              onClick={() => setIsMobileNavOpen(false)}
+            />
+            <div className="relative z-10 w-[260px] h-full shadow-2xl bg-white animate-in slide-in-from-left duration-200">
+              <ZicoSidebar
+                activeTab={activeTab}
+                onSelectTab={(tab) => {
+                  setActiveTab(tab);
+                  setIsMobileNavOpen(false);
+                }}
+                onCloseMobile={() => setIsMobileNavOpen(false)}
+              />
+            </div>
+          </div>
+        )}
+
+        {/* 2. Main Content Area */}
+        <main className="flex-1 flex flex-col p-3 sm:p-5 lg:p-6 overflow-y-auto max-w-full">
+          {/* Hero Section */}
+          <HeroSection />
+
+          {/* Quick Actions Bar */}
+          <QuickActionBar onSelectAction={handleSelectPrompt} />
+
+          {/* Chat Container Card */}
+          <div className="flex-1 bg-white rounded-3xl border border-[#E5E7EB] shadow-soft p-4 sm:p-6 min-h-[520px] flex flex-col">
+            <Timeline tripId={tripId} externalPrompt={externalPrompt} />
+          </div>
+        </main>
+
+        {/* 3. Right Sidebar (Desktop) */}
+        <aside
+          className="hidden xl:block w-[340px] shrink-0 p-5 pl-0 overflow-y-auto h-[calc(100vh-4rem)] sticky top-16 select-none"
+          aria-label="Assistant tools and history"
+        >
+          <TravelAssistantCard />
+          <PopularQuestionsCard onSelectQuestion={handleSelectPrompt} />
+          <RecentConversationsCard onSelectConversation={handleSelectPrompt} />
+        </aside>
+
+        {/* Right Sidebar (Mobile / Tablet Drawer) */}
+        {isMobileRightPanelOpen && (
+          <div className="fixed inset-0 z-50 flex justify-end xl:hidden">
+            <div
+              className="fixed inset-0 bg-black/30 backdrop-blur-sm"
+              onClick={() => setIsMobileRightPanelOpen(false)}
+            />
+            <div className="relative z-10 w-[320px] sm:w-[350px] h-full shadow-2xl bg-[#FAFAF7] p-5 overflow-y-auto animate-in slide-in-from-right duration-200 border-l border-[#E5E7EB]">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="font-bold text-base text-[#101828]">Travel Assistant</h3>
+                <button
+                  onClick={() => setIsMobileRightPanelOpen(false)}
+                  className="p-1.5 rounded-lg text-[#667085] hover:bg-white transition-colors"
+                  aria-label="Close assistant drawer"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              <TravelAssistantCard />
+              <PopularQuestionsCard onSelectQuestion={handleSelectPrompt} />
+              <RecentConversationsCard onSelectConversation={handleSelectPrompt} />
+            </div>
+          </div>
+        )}
       </div>
-    </main>
+    </div>
   );
 }

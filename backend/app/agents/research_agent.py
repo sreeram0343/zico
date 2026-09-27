@@ -83,6 +83,21 @@ CONVERSATIONAL_PREFIX_REGEX = re.compile(
     re.IGNORECASE,
 )
 
+# Allowed research and travel intents supported by ResearchAgent
+ALLOWED_RESEARCH_INTENTS: Set[str] = {
+    "research",
+    "HOTEL_SEARCH",
+    "DESTINATION_RESEARCH",
+    "ITINERARY_PLANNING",
+    "TRAVEL_POLICY",
+    "LOCATION_QUERY",
+    "hotel_search",
+    "destination_research",
+    "itinerary_planning",
+    "travel_policy",
+    "location_query",
+}
+
 # System prompt for LLM-assisted query generation
 RESEARCH_SYSTEM_PROMPT = """You are ZICO's Travel Research Query Generator.
 Your task is to transform a travel inquiry into a focused, highly effective web search query.
@@ -175,13 +190,17 @@ class ResearchAgent:
         # 1. Strip trailing question marks and punctuation
         query = query.rstrip("?.! ")
 
-        # 2. Check for multi-turn context (e.g. destination in state)
-        raw_dest = state.get("destination")
-        dest_name = self._resolve_location_name(raw_dest) if raw_dest else None
+        # 2. Check for multi-turn context (e.g. location or destination in state)
+        raw_loc = state.get("location") or state.get("destination")
+        loc_name = self._resolve_location_name(raw_loc) if raw_loc else None
 
-        if dest_name and dest_name.lower() not in query.lower():
-            # Incorporate destination if not already present
-            query = f"{dest_name} {query}"
+        if loc_name and loc_name.lower() not in query.lower():
+            query = f"{loc_name} {query}"
+
+        # If budget is present and not mentioned in query, add it
+        budget = state.get("budget")
+        if budget and budget.lower() not in query.lower():
+            query = f"{query} budget {budget}"
 
         # 3. Check for temporal keywords in the user query
         has_temporal = any(w in user_query.lower() for w in TEMPORAL_KEYWORDS)
@@ -333,7 +352,7 @@ class ResearchAgent:
 
         # 1. Intent Validation Guard
         intent = state.get("intent")
-        if intent != "research":
+        if intent not in ALLOWED_RESEARCH_INTENTS:
             logger.warning("Research Agent invoked with non-research intent %r", intent)
             return {
                 "research_status": "error",

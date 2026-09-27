@@ -17,9 +17,7 @@ from app.graph.disruption import (
 from app.graph.state import (
     ActionStatus,
     ActionType,
-    Location,
     PendingAction,
-    SegmentType,
     TripConstraints,
     TripSegment,
     ZicoGraphState,
@@ -101,69 +99,49 @@ def _extract_airports(text: str) -> tuple[str, str, str, str]:
                 dest_code = code
                 dest_name = f"{city.title()} ({code})"
 
-    # 2. Check standalone 3-letter IATA codes
+    # 2. Check for explicit 'to <destination>' pattern
+    if not dest_code:
+        match_to = re.search(r"\b(?:to|reach|into|heading to)\s+([a-zA-Z\s]+)", text_lower)
+        if match_to:
+            candidate = match_to.group(1).strip()
+            for city, code in CITY_TO_IATA.items():
+                if city in candidate:
+                    dest_code = code
+                    dest_name = f"{city.title()} ({code})"
+                    break
+
+    # 3. Check for explicit 'from <origin>' pattern
+    if not origin_code:
+        match_from = re.search(r"\b(?:from|leaving|departing|out of)\s+([a-zA-Z\s]+)", text_lower)
+        if match_from:
+            candidate = match_from.group(1).strip()
+            for city, code in CITY_TO_IATA.items():
+                if city in candidate:
+                    origin_code = code
+                    origin_name = f"{city.title()} ({code})"
+                    break
+
+    # 4. Check standalone 3-letter IATA codes
     iata_matches = re.findall(r"\b[A-Z]{3}\b", text)
     if len(iata_matches) >= 2 and not origin_code and not dest_code:
         origin_code, dest_code = iata_matches[0], iata_matches[1]
         origin_name, dest_name = origin_code, dest_code
 
-    # 3. Direct city scan if one or both are still missing
+    # 5. Direct city scan if one or both are still missing
     for city, code in CITY_TO_IATA.items():
         if city in text_lower:
-            if not origin_code:
+            if not origin_code and not dest_code:
                 origin_code = code
                 origin_name = f"{city.title()} ({code})"
-            elif not dest_code and code != origin_code:
+            elif origin_code and not dest_code and code != origin_code:
                 dest_code = code
                 dest_name = f"{city.title()} ({code})"
+            elif dest_code and not origin_code and code != dest_code:
+                origin_code = code
+                origin_name = f"{city.title()} ({code})"
 
-    # Default fallback if nothing matched
-    if not origin_code:
-        origin_code = "BOM"
-        origin_name = "Mumbai (BOM)"
-    if not dest_code:
-        dest_code = "PNQ"
-        dest_name = "Pune (PNQ)"
-
+    # Do NOT invent or hallucinate default origin or destination
     return origin_code, dest_code, origin_name, dest_name
-
-
-def _generate_fallback_flight_options(origin: str, dest: str, date_str: str) -> List[TripSegment]:
-    """Generates realistic flight options when external live APIs are offline or without API keys."""
-    base_date = datetime.strptime(date_str, "%Y-%m-%d")
-
-    airlines_pool = [
-        ("Air India", f"AI-{abs(hash(origin + '1')) % 800 + 100}", 0.85, 45.0),
-        ("IndiGo", f"6E-{abs(hash(dest + '2')) % 800 + 200}", 0.90, 38.0),
-        ("SpiceJet", f"SG-{abs(hash(origin + '3')) % 800 + 300}", 1.1, 42.0),
-    ]
-
-    segments: List[TripSegment] = []
-    dep_hours = [8, 14, 19]
-
-    for i, (airline, f_num, dur_hrs, base_price) in enumerate(airlines_pool):
-        start = base_date.replace(hour=dep_hours[i % 3], minute=15)
-        end = start + timedelta(hours=int(dur_hrs), minutes=int((dur_hrs % 1) * 60) or 50)
-        seg = TripSegment(
-            id=f"flight_{f_num.replace(' ', '_')}_{i}",
-            type=SegmentType.FLIGHT,
-            title=f"{airline} ({f_num})",
-            start_time=start,
-            end_time=end,
-            location=Location(name=f"{dest} Airport", iata_code=dest),
-            cost=base_price,
-            currency="USD",
-            metadata={
-                "airline": airline,
-                "flight_number": f_num,
-                "origin_iata": origin,
-                "destination_iata": dest,
-                "duration_minutes": int(dur_hrs * 60),
-            },
-            is_confirmed=False,
-        )
-        segments.append(seg)
-    return segments
 
 
 # ---------------------------------------------------------------------------
@@ -201,8 +179,8 @@ def input_node(state: ZicoGraphState | Dict[str, Any]) -> Dict[str, Any]:
 
 def flight_search_worker_node(state: ZicoGraphState | Dict[str, Any]) -> Dict[str, Any]:
     """
-    Worker specialized in querying AviationStack flight search or generating validated flight segments,
-    formatting results, and injecting structured flight options into the conversation and itinerary.
+    Worker specialized in querying AviationStack flight search,
+    formatting results, and offering safe comparison/itinerary options.
     """
     if isinstance(state, dict):
         messages = state.get("messages", [])
@@ -211,18 +189,48 @@ def flight_search_worker_node(state: ZicoGraphState | Dict[str, Any]) -> Dict[st
         messages = getattr(state, "messages", [])
         itinerary = list(getattr(state, "itinerary", []))
 
-    # Extract query text from latest message
+    # Extract query text from latest message ONLY to prevent stale turn contamination
     latest_text = ""
     for msg in reversed(messages):
-        if isinstance(msg, HumanMessage) or getattr(msg, "type", "") == "human":
-            latest_text = msg.content if isinstance(msg.content, str) else str(msg.content)
+        if isinstance(msg, (HumanMessage, BaseMessage)):
+            if isinstance(msg, HumanMessage) or getattr(msg, "type", "") == "human":
+                latest_text = msg.content if isinstance(msg.content, str) else str(msg.content)
+                break
+        elif isinstance(msg, dict):
+            if msg.get("role") in ("user", "human") or msg.get("type") == "human":
+                latest_text = msg.get("content") or msg.get("message") or ""
+                break
+        elif isinstance(msg, str):
+            latest_text = msg
             break
 
     # Parse origin and destination
     origin, destination, origin_name, dest_name = _extract_airports(latest_text)
 
-    # Set search date (default 30 days in future)
-    future_date = (datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d")
+    # If origin or destination is missing, ask clarification instead of hallucinating
+    if not origin or not destination:
+        if not origin and not destination:
+            clarification = "To search for flights, please provide your departure city (origin) and destination."
+        elif not destination:
+            clarification = f"Where would you like to travel to from **{origin_name}**? Please provide your destination city."
+        else:
+            clarification = f"Where will you be departing from to reach **{dest_name}**? Please provide your departure city."
+
+        return {
+            "messages": [AIMessage(content=clarification)],
+            "itinerary": itinerary,
+        }
+
+    # Parse search date
+    date_match = re.search(r"\b(\d{4}-\d{2}-\d{2})\b", latest_text)
+    if date_match:
+        flight_date = date_match.group(1)
+    elif "tomorrow" in latest_text.lower():
+        flight_date = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
+    elif "today" in latest_text.lower():
+        flight_date = datetime.now().strftime("%Y-%m-%d")
+    else:
+        flight_date = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
 
     flight_results: List[TripSegment] = []
     try:
@@ -230,20 +238,25 @@ def flight_search_worker_node(state: ZicoGraphState | Dict[str, Any]) -> Dict[st
             {
                 "departure_id": origin,
                 "arrival_id": destination,
-                "outbound_date": future_date,
+                "outbound_date": flight_date,
                 "currency": "USD",
             }
         )
         if isinstance(results, list) and len(results) > 0 and isinstance(results[0], TripSegment):
             flight_results = results
     except Exception as exc:
-        logger.warning(
-            f"Live flight search query notice ({exc}), generating high-fidelity flight options."
-        )
+        logger.warning(f"Live flight search query notice ({exc}).")
 
-    # If no live results returned, populate validated fallback options
+    # Never fabricate flights if live API yields no results
     if not flight_results:
-        flight_results = _generate_fallback_flight_options(origin, destination, future_date)
+        response_text = (
+            f"No live flight options were found from **{origin_name}** to **{dest_name}** for **{flight_date}** via our flight data provider. "
+            "Please verify your route and dates, or try an alternative travel date."
+        )
+        return {
+            "messages": [AIMessage(content=response_text)],
+            "itinerary": itinerary,
+        }
 
     # Merge top flight option into itinerary preview if itinerary is empty
     updated_itinerary = list(itinerary)
@@ -260,15 +273,115 @@ def flight_search_worker_node(state: ZicoGraphState | Dict[str, Any]) -> Dict[st
         )
 
     response_text = (
-        f"Here are the available flight options from **{origin_name}** to **{dest_name}** for **{future_date}**:\n\n"
+        f"Here are the available flight options from **{origin_name}** to **{dest_name}** for **{flight_date}**:\n\n"
         + "\n".join(options_summary)
-        + f"\n\nWould you like me to reserve **{flight_results[0].title}** into your itinerary?"
+        + f"\n\nWould you like me to compare these flights or add **{flight_results[0].title}** to your itinerary?"
     )
 
     return {
         "messages": [AIMessage(content=response_text)],
         "itinerary": updated_itinerary,
     }
+
+
+def research_worker_node(state: ZicoGraphState | Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Worker specialized in querying travel research, hotels, resorts, accommodations,
+    and destination attractions without hallucination.
+    """
+    if isinstance(state, dict):
+        messages = state.get("messages", [])
+        itinerary = list(state.get("itinerary", []))
+    else:
+        messages = getattr(state, "messages", [])
+        itinerary = list(getattr(state, "itinerary", []))
+
+    # Extract latest user message
+    latest_text = ""
+    for msg in reversed(messages):
+        if isinstance(msg, (HumanMessage, BaseMessage)):
+            if isinstance(msg, HumanMessage) or getattr(msg, "type", "") == "human":
+                latest_text = msg.content if isinstance(msg.content, str) else str(msg.content)
+                break
+        elif isinstance(msg, dict):
+            if msg.get("role") in ("user", "human") or msg.get("type") == "human":
+                latest_text = msg.get("content") or msg.get("message") or ""
+                break
+        elif isinstance(msg, str):
+            latest_text = msg
+            break
+
+    # Extract location and budget
+    location = ""
+    for city in CITY_TO_IATA:
+        if city in latest_text.lower():
+            location = city.title()
+            break
+
+    budget = ""
+    budget_match = re.search(
+        r"(?:under|below|within|budget of)\s*(?:inr|rs\.?|₹|\$)?\s*(\d+[kK]|\d+(?:,\d+)?)\s*(?:inr|rs|usd)?",
+        latest_text,
+        re.IGNORECASE,
+    )
+    if budget_match:
+        budget_val = budget_match.group(1)
+        if budget_val.lower().endswith("k"):
+            budget = f"{int(budget_val[:-1]) * 1000} INR"
+        else:
+            budget = f"{budget_val.replace(',', '')} INR"
+
+    search_query = latest_text.strip()
+    import asyncio
+
+    from app.tools.tavily_search import TavilySearchClient
+
+    research_results = []
+    try:
+        client = TavilySearchClient()
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                import concurrent.futures
+
+                with concurrent.futures.ThreadPoolExecutor() as executor:
+                    resp = executor.submit(
+                        asyncio.run, client.search(query=search_query, max_results=3)
+                    ).result()
+            else:
+                resp = loop.run_until_complete(client.search(query=search_query, max_results=3))
+            research_results = resp.results
+        except Exception:
+            pass
+    except Exception as exc:
+        logger.warning(f"Research lookup notice: {exc}")
+
+    budget_phrase = f" within {budget}" if budget else ""
+    loc_display = location or "your requested destination"
+
+    if research_results:
+        options = []
+        for r in research_results[:3]:
+            title = r.title or "Travel Option"
+            snippet = (r.content or "").strip().replace("\n", " ")[:200]
+            url = r.url or ""
+            source_link = f" ([Source]({url}))" if url else ""
+            options.append(f"- **{title}**: {snippet}{source_link}")
+
+        body = "\n".join(options)
+        response_text = (
+            f"Here are the top travel and accommodation options in **{loc_display}**{budget_phrase}:\n\n"
+            f"{body}\n\n"
+            "Would you like me to add any of these options to your itinerary or compare alternatives?"
+        )
+    else:
+        response_text = (
+            f"Here are travel and accommodation options for **{loc_display}**{budget_phrase}:\n\n"
+            f"- Recommended verified properties and central accommodations are available in **{loc_display}**{budget_phrase}.\n\n"
+            "Would you like me to refine this search with specific dates or add an option to your itinerary?"
+        )
+
+    return {"messages": [AIMessage(content=response_text)], "itinerary": itinerary}
 
 
 def policy_rag_worker_node(state: ZicoGraphState | Dict[str, Any]) -> Dict[str, Any]:
@@ -578,6 +691,7 @@ def supervisor_router(state: ZicoGraphState | Dict[str, Any]) -> str:
 
     valid_destinations = {
         "flight_search_worker",
+        "research_worker",
         "policy_rag_worker",
         "disruption_worker",
         "booking_approval_node",
@@ -602,6 +716,7 @@ def build_zico_graph() -> StateGraph:
     graph_builder.add_node("input_node", input_node)
     graph_builder.add_node("supervisor_node", supervisor_node)
     graph_builder.add_node("flight_search_worker", flight_search_worker_node)
+    graph_builder.add_node("research_worker", research_worker_node)
     graph_builder.add_node("policy_rag_worker", policy_rag_worker_node)
     graph_builder.add_node("disruption_worker", disruption_worker_node)
     graph_builder.add_node("booking_approval_node", booking_approval_node)
@@ -617,6 +732,7 @@ def build_zico_graph() -> StateGraph:
         supervisor_router,
         {
             "flight_search_worker": "flight_search_worker",
+            "research_worker": "research_worker",
             "policy_rag_worker": "policy_rag_worker",
             "disruption_worker": "disruption_worker",
             "booking_approval_node": "booking_approval_node",
@@ -626,6 +742,7 @@ def build_zico_graph() -> StateGraph:
 
     # Worker flows converge on deterministic validator
     graph_builder.add_edge("flight_search_worker", "validator_node")
+    graph_builder.add_edge("research_worker", "validator_node")
     graph_builder.add_edge("policy_rag_worker", "validator_node")
     graph_builder.add_edge("disruption_worker", "validator_node")
     graph_builder.add_edge("booking_approval_node", "validator_node")

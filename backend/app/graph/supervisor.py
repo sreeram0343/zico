@@ -20,6 +20,7 @@ class RouteDecision(BaseModel):
 
     next_step: Literal[
         "flight_search_worker",
+        "research_worker",
         "policy_rag_worker",
         "disruption_worker",
         "booking_approval_node",
@@ -42,14 +43,16 @@ SUPERVISOR_SYSTEM_PROMPT = """You are the Lead Routing Supervisor for the ZICO i
 Analyze the traveler's conversation history, active state, and latest inquiry to classify intent and select the single most appropriate worker.
 
 Available Workers:
-1. flight_search_worker: For flight searches, schedules, airline availability, fares, and new flight reservations.
-2. policy_rag_worker: For baggage dimensions/weight rules, cancellation policies, EU261 passenger compensation, visas, and insurance regulations.
-3. disruption_worker: For flight delays, cancellations, missed connections, schedule collisions, and urgent rebooking assistance.
-4. booking_approval_node: When approving or executing a pending booking or cancellation action.
-5. validator_node: For checking itinerary conflict overlaps, layover buffers, and budget compliance.
-6. FINISH: When the user's intent is answered or no further worker action is required.
+1. flight_search_worker: For flight searches, flight status, schedules, and airline availability. NEVER use for hotels or destination sightseeing.
+2. research_worker: For hotel searches, accommodation, resorts, budget stays, destination research, local attractions, things to do, and travel planning.
+3. policy_rag_worker: For baggage dimensions/weight rules, cancellation policies, EU261 passenger compensation, visas, and insurance regulations.
+4. disruption_worker: For flight delays, cancellations, missed connections, schedule collisions, and urgent rebooking assistance.
+5. booking_approval_node: When approving or executing a pending booking or cancellation action.
+6. validator_node: For checking itinerary conflict overlaps, layover buffers, and budget compliance.
+7. FINISH: When the user's intent is answered or no further worker action is required.
 
 Safety Rules:
+- If the user asks about hotels, resorts, or accommodation (e.g. 'Hotels in Pune under 10k'), you MUST route to research_worker. NEVER route hotel inquiries to flight_search_worker.
 - If traveler intent is ambiguous, low-confidence, or unclear (confidence < 0.65), default to validator_node.
 - Never guess or route to a specialized worker without explicit intent.
 """
@@ -59,26 +62,37 @@ def _classify_intent_heuristically(latest_text: str) -> str:
     """Deterministic fallback intent classifier when LLM is offline, rate-limited, or quota exceeded."""
     lower = latest_text.lower()
 
+    # 1. Hotel and Destination Research has highest priority over general terms
     if any(
         k in lower
         for k in [
-            "flight",
-            "flights",
-            "fly",
-            "airline",
-            "ticket",
-            "airport",
-            "plane",
-            "from ",
-            "trip to",
+            "hotel",
+            "hotels",
+            "hostel",
+            "resort",
+            "stay",
+            "room",
+            "lodging",
+            "accommodation",
+            "places to visit",
+            "attractions",
+            "sightseeing",
+            "things to do",
+            "explore",
+            "visit in",
+            "guide",
         ]
     ):
-        return "flight_search_worker"
+        return "research_worker"
+
+    # 2. Flight disruptions
     if any(
         k in lower
         for k in ["delay", "cancel", "reschedule", "disrupt", "missed", "stranded", "late"]
     ):
         return "disruption_worker"
+
+    # 3. Policy & Regulations
     if any(
         k in lower
         for k in [
@@ -96,10 +110,29 @@ def _classify_intent_heuristically(latest_text: str) -> str:
         ]
     ):
         return "policy_rag_worker"
+
+    # 4. Approvals
     if any(
         k in lower for k in ["approve", "confirm", "proceed", "yes", "accept", "reject", "deny"]
     ):
         return "booking_approval_node"
+
+    # 5. Flight Search
+    if any(
+        k in lower
+        for k in [
+            "flight",
+            "flights",
+            "fly",
+            "airline",
+            "ticket",
+            "airport",
+            "plane",
+            "from ",
+            "trip to",
+        ]
+    ):
+        return "flight_search_worker"
 
     return DEFAULT_FALLBACK_ROUTE
 
