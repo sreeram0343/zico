@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
-import { StreamEvent, InterruptEvent, TripSegment } from '@/types';
+import { StreamEvent, InterruptEvent, TripSegment, ChatMessage, SourceCitation } from '@/types';
 import {
   Plane,
   Hotel,
@@ -17,225 +17,303 @@ import {
   MapPin,
   DollarSign,
   X,
+  Mic,
+  MicOff,
+  ExternalLink,
   RefreshCw,
+  Sparkles,
 } from 'lucide-react';
 
 interface TimelineProps {
   tripId: string;
   userId?: string;
   wsBaseUrl?: string;
+  apiBaseUrl?: string;
 }
 
 export function Timeline({
   tripId,
   userId = 'traveler_01',
   wsBaseUrl = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8000',
+  apiBaseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000',
 }: TimelineProps) {
   const [socket, setSocket] = useState<WebSocket | null>(null);
   const [isConnected, setIsConnected] = useState<boolean>(false);
-  const [messages, setMessages] = useState<
-    Array<{ role: 'user' | 'assistant' | 'system'; text: string; node?: string; time: string }>
-  >([]);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [activeInterrupt, setActiveInterrupt] = useState<InterruptEvent | null>(null);
   const [itinerary, setItinerary] = useState<TripSegment[]>([]);
   const [promptInput, setPromptInput] = useState<string>('');
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
   const [activeWorkerNode, setActiveWorkerNode] = useState<string | null>(null);
 
-  // New streaming state
+  // Streaming token state
   const [streamingTokenMessage, setStreamingTokenMessage] = useState<string>('');
   const streamingTokenRef = useRef<string>('');
   const [activeToolCall, setActiveToolCall] = useState<{ tool: string; input?: any } | null>(null);
   const [streamError, setStreamError] = useState<string | null>(null);
+
+  // Voice recording state
+  const [isRecording, setIsRecording] = useState<boolean>(false);
+  const [recordingSeconds, setRecordingSeconds] = useState<number>(0);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const timerRef = useRef<NodeJS.Timeout | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
 
   // Initialize WebSocket connection
   useEffect(() => {
     const wsUrl = `${wsBaseUrl.replace(/^http/, 'ws')}/ws/stream/${tripId}`;
-    console.log('[CLIENT] Connecting to WebSocket:', wsUrl);
-    const ws = new WebSocket(wsUrl);
+    let ws: WebSocket;
 
-    ws.onopen = () => {
-      console.log('[CLIENT] WebSocket connected successfully to:', wsUrl);
-      setIsConnected(true);
-      setStreamError(null);
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: 'system',
-          text: `Connected to ZICO Real-time Orchestration Engine (Trip: ${tripId})`,
-          time: new Date().toLocaleTimeString(),
-        },
-      ]);
-    };
+    try {
+      ws = new WebSocket(wsUrl);
 
-    // Strict JSON message parsing and routing
-    ws.onmessage = (event) => {
-      let streamEvent: StreamEvent;
-      try {
-        streamEvent = JSON.parse(event.data);
-      } catch (parseErr) {
-        console.error('[CLIENT] Failed to parse WebSocket message JSON:', parseErr, event.data);
-        setStreamError(`Malformed JSON received from server: ${String(parseErr)}`);
-        return;
-      }
-
-      console.log('[CLIENT] Message received:', streamEvent.type, streamEvent);
-
-      // 1. Token chunk stream -> Route to active streaming text bubble
-      if (streamEvent.type === 'token') {
-        const tokenChunk = streamEvent.content || '';
-        streamingTokenRef.current += tokenChunk;
-        setStreamingTokenMessage((prev) => prev + tokenChunk);
-        setIsProcessing(false);
-      }
-
-      // 2. Tool call invocation -> Route to active execution indicator
-      else if (streamEvent.type === 'tool_call') {
-        console.log('[CLIENT] Tool execution invoked:', streamEvent.tool);
-        setActiveToolCall({
-          tool: streamEvent.tool || 'Tool',
-          input: streamEvent.input,
-        });
-        setActiveWorkerNode(streamEvent.tool || null);
-      }
-
-      // 3. State update -> Route to update Live Trip Timeline state
-      else if (streamEvent.type === 'state_update') {
-        console.log('[CLIENT] State update received. Itinerary count:', streamEvent.itinerary?.length);
-        if (streamEvent.itinerary && Array.isArray(streamEvent.itinerary)) {
-          setItinerary(streamEvent.itinerary);
-        }
-      }
-
-      // 4. Status update -> Node start / Thinking indicator
-      else if (streamEvent.type === 'status') {
-        const nodeName = streamEvent.node || 'supervisor';
-        console.log('[CLIENT] Status update from node:', nodeName);
-        setActiveWorkerNode(nodeName);
-        setIsProcessing(true);
-      }
-
-      // 5. Node update -> Legacy output and fallback message handler
-      else if (streamEvent.type === 'node_update') {
-        setActiveWorkerNode(streamEvent.node || null);
-
-        if (streamEvent.output?.itinerary && Array.isArray(streamEvent.output.itinerary)) {
-          setItinerary(streamEvent.output.itinerary);
-        }
-
-        const msgText =
-          streamEvent.message ||
-          streamEvent.content ||
-          (streamEvent.output?.messages && streamEvent.output.messages[0]?.content) ||
-          '';
-
-        // Only append static node message if no streaming tokens were received
-        if (msgText && !streamingTokenRef.current) {
-          setMessages((prev) => [
-            ...prev,
-            {
-              role: 'assistant',
-              text: typeof msgText === 'string' ? msgText : JSON.stringify(msgText),
-              node: streamEvent.node,
-              time: new Date().toLocaleTimeString(),
-            },
-          ]);
-        }
-      }
-
-      // 6. Dynamic Human-in-the-Loop Interrupt
-      else if (streamEvent.type === 'interrupt' && streamEvent.interrupt_value) {
-        console.log('[CLIENT] Interrupt event received:', streamEvent.interrupt_value);
-        setActiveInterrupt(streamEvent.interrupt_value);
-        setIsProcessing(false);
-        setActiveToolCall(null);
-      }
-
-      // 7. Audio / Voice playback
-      else if (streamEvent.type === 'voice_chunk' && streamEvent.audio_base64) {
-        try {
-          const audio = new Audio(`data:audio/wav;base64,${streamEvent.audio_base64}`);
-          audio.play().catch(() => {});
-        } catch (e) {
-          console.debug('Audio playback note:', e);
-        }
-      }
-
-      // 8. Turn completion -> Finalize streaming bubble into message history
-      else if (streamEvent.type === 'turn_complete') {
-        console.log('[CLIENT] Turn completed for trip:', tripId);
-        if (streamingTokenRef.current) {
-          const finalTokenContent = streamingTokenRef.current;
-          setMessages((prev) => [
-            ...prev,
-            {
-              role: 'assistant',
-              text: finalTokenContent,
-              time: new Date().toLocaleTimeString(),
-            },
-          ]);
-          streamingTokenRef.current = '';
-          setStreamingTokenMessage('');
-        }
-        setIsProcessing(false);
-        setActiveWorkerNode(null);
-        setActiveToolCall(null);
-      }
-
-      // 9. Error frame -> Route to Error Boundary UI
-      else if (streamEvent.type === 'error') {
-        const errText = streamEvent.message || streamEvent.content || 'A stream error occurred';
-        console.error('[CLIENT] Stream error:', errText);
-        setStreamError(errText);
+      ws.onopen = () => {
+        setIsConnected(true);
+        setStreamError(null);
         setMessages((prev) => [
           ...prev,
           {
             role: 'system',
-            text: `Error: ${errText}`,
+            text: `Connected to ZICO Real-time Operations Engine (Trip: ${tripId})`,
             time: new Date().toLocaleTimeString(),
           },
         ]);
-        setIsProcessing(false);
+      };
+
+      ws.onmessage = (event) => {
+        let streamEvent: StreamEvent;
+        try {
+          streamEvent = JSON.parse(event.data);
+        } catch (parseErr) {
+          console.error('[CLIENT] Failed to parse WebSocket message JSON:', parseErr);
+          setStreamError(`Malformed data from server: ${String(parseErr)}`);
+          return;
+        }
+
+        // 1. Token chunk stream
+        if (streamEvent.type === 'token') {
+          const tokenChunk = streamEvent.content || '';
+          streamingTokenRef.current += tokenChunk;
+          setStreamingTokenMessage((prev) => prev + tokenChunk);
+          setIsProcessing(false);
+        }
+
+        // 2. Tool call invocation
+        else if (streamEvent.type === 'tool_call') {
+          setActiveToolCall({
+            tool: streamEvent.tool || 'Tool',
+            input: streamEvent.input,
+          });
+          setActiveWorkerNode(streamEvent.tool || null);
+        }
+
+        // 3. State update (Itinerary changes)
+        else if (streamEvent.type === 'state_update') {
+          if (streamEvent.itinerary && Array.isArray(streamEvent.itinerary)) {
+            setItinerary(streamEvent.itinerary);
+          }
+        }
+
+        // 4. Status update
+        else if (streamEvent.type === 'status') {
+          setActiveWorkerNode(streamEvent.node || 'supervisor');
+          setIsProcessing(true);
+        }
+
+        // 5. Node update
+        else if (streamEvent.type === 'node_update') {
+          setActiveWorkerNode(streamEvent.node || null);
+
+          if (streamEvent.output?.itinerary && Array.isArray(streamEvent.output.itinerary)) {
+            setItinerary(streamEvent.output.itinerary);
+          }
+
+          const msgText =
+            streamEvent.message ||
+            streamEvent.content ||
+            (streamEvent.output?.messages && streamEvent.output.messages[0]?.content) ||
+            '';
+
+          if (msgText && !streamingTokenRef.current) {
+            setMessages((prev) => [
+              ...prev,
+              {
+                role: 'assistant',
+                text: typeof msgText === 'string' ? msgText : JSON.stringify(msgText),
+                node: streamEvent.node,
+                time: new Date().toLocaleTimeString(),
+                sources: streamEvent.sources,
+              },
+            ]);
+          }
+        }
+
+        // 6. Human-in-the-Loop Interrupt
+        else if (streamEvent.type === 'interrupt' && streamEvent.interrupt_value) {
+          setActiveInterrupt(streamEvent.interrupt_value);
+          setIsProcessing(false);
+          setActiveToolCall(null);
+        }
+
+        // 7. Audio playback
+        else if (streamEvent.type === 'voice_chunk' && streamEvent.audio_base64) {
+          try {
+            const audio = new Audio(`data:audio/wav;base64,${streamEvent.audio_base64}`);
+            audio.play().catch(() => {});
+          } catch (e) {
+            console.debug('Audio note:', e);
+          }
+        }
+
+        // 8. Turn completion
+        else if (streamEvent.type === 'turn_complete') {
+          if (streamingTokenRef.current) {
+            const finalTokenContent = streamingTokenRef.current;
+            setMessages((prev) => [
+              ...prev,
+              {
+                role: 'assistant',
+                text: finalTokenContent,
+                time: new Date().toLocaleTimeString(),
+              },
+            ]);
+            streamingTokenRef.current = '';
+            setStreamingTokenMessage('');
+          }
+          setIsProcessing(false);
+          setActiveWorkerNode(null);
+          setActiveToolCall(null);
+        }
+
+        // 9. Error frame
+        else if (streamEvent.type === 'error') {
+          const errText = streamEvent.message || streamEvent.content || 'An error occurred';
+          setStreamError(errText);
+          setMessages((prev) => [
+            ...prev,
+            {
+              role: 'system',
+              text: `Error: ${errText}`,
+              time: new Date().toLocaleTimeString(),
+            },
+          ]);
+          setIsProcessing(false);
+          setActiveToolCall(null);
+        }
+      };
+
+      ws.onclose = () => {
+        setIsConnected(false);
+        setActiveWorkerNode(null);
         setActiveToolCall(null);
-      }
-    };
+      };
 
-    ws.onclose = (event) => {
-      console.log('[CLIENT] WebSocket closed:', event.code, event.reason);
+      ws.onerror = () => {
+        setIsConnected(false);
+      };
+
+      setSocket(ws);
+    } catch {
       setIsConnected(false);
-      setActiveWorkerNode(null);
-      setActiveToolCall(null);
-    };
-
-    ws.onerror = (err) => {
-      console.error('[CLIENT] WebSocket connection error:', err);
-      setIsConnected(false);
-      setStreamError('WebSocket connection error. Ensure the backend server is running on port 8000.');
-    };
-
-    setSocket(ws);
+    }
 
     return () => {
-      console.log('[CLIENT] Closing WebSocket connection');
-      ws.close();
+      if (ws) {
+        ws.close();
+      }
     };
   }, [tripId, wsBaseUrl]);
 
-  // Auto-scroll messages
+  // Auto-scroll
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, streamingTokenMessage, activeInterrupt, activeToolCall]);
 
-  // Send message over WebSocket
-  const handleSendPrompt = (e?: React.FormEvent) => {
+  // Voice recording timer
+  useEffect(() => {
+    if (isRecording) {
+      setRecordingSeconds(0);
+      timerRef.current = setInterval(() => {
+        setRecordingSeconds((prev) => prev + 1);
+      }, 1000);
+    } else {
+      if (timerRef.current) clearInterval(timerRef.current);
+      setRecordingSeconds(0);
+    }
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+    };
+  }, [isRecording]);
+
+  // Toggle voice recording
+  const handleToggleVoiceRecording = async () => {
+    if (isRecording) {
+      // Stop recording
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+        mediaRecorderRef.current.stop();
+      }
+      setIsRecording(false);
+    } else {
+      // Start recording
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const mediaRecorder = new MediaRecorder(stream);
+        mediaRecorderRef.current = mediaRecorder;
+        audioChunksRef.current = [];
+
+        mediaRecorder.ondataavailable = (event) => {
+          if (event.data.size > 0) {
+            audioChunksRef.current.push(event.data);
+          }
+        };
+
+        mediaRecorder.onstop = async () => {
+          stream.getTracks().forEach((track) => track.stop());
+          const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/wav' });
+
+          // Send to voice transcribe API
+          setIsProcessing(true);
+          try {
+            const formData = new FormData();
+            formData.append('file', audioBlob, 'voice_query.wav');
+
+            const resp = await fetch(`${apiBaseUrl.replace(/\/$/, '')}/api/v1/voice/transcribe`, {
+              method: 'POST',
+              body: formData,
+            });
+
+            if (resp.ok) {
+              const data = await resp.json();
+              if (data.transcript) {
+                setPromptInput(data.transcript);
+              }
+            } else {
+              setStreamError('Audio transcription failed on server.');
+            }
+          } catch (err) {
+            setStreamError(`Voice service error: ${String(err)}`);
+          } finally {
+            setIsProcessing(false);
+          }
+        };
+
+        mediaRecorder.start();
+        setIsRecording(true);
+      } catch (err) {
+        setStreamError('Microphone access denied or unavailable.');
+        console.error('Mic error:', err);
+      }
+    }
+  };
+
+  // Send message (WebSocket with HTTP Fallback)
+  const handleSendPrompt = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    if (!promptInput.trim() || !socket || !isConnected) return;
+    if (!promptInput.trim() || isProcessing) return;
 
     const userText = promptInput.trim();
-    console.log('[CLIENT] Sending message:', userText);
-
     setStreamError(null);
     streamingTokenRef.current = '';
     setStreamingTokenMessage('');
@@ -245,36 +323,80 @@ export function Timeline({
       ...prev,
       { role: 'user', text: userText, time: new Date().toLocaleTimeString() },
     ]);
-
-    socket.send(
-      JSON.stringify({
-        type: 'prompt',
-        message: userText,
-        content: userText,
-        trip_id: tripId,
-        user_id: userId,
-        enable_tts: true,
-      })
-    );
-
     setPromptInput('');
     setIsProcessing(true);
+
+    // If WebSocket is open and connected, send via WebSocket
+    if (socket && isConnected && socket.readyState === WebSocket.OPEN) {
+      socket.send(
+        JSON.stringify({
+          type: 'prompt',
+          message: userText,
+          content: userText,
+          trip_id: tripId,
+          user_id: userId,
+          enable_tts: true,
+        })
+      );
+    } else {
+      // HTTP API Fallback to POST /api/v1/chat
+      try {
+        const resp = await fetch(`${apiBaseUrl.replace(/\/$/, '')}/api/v1/chat`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            message: userText,
+            session_id: tripId,
+            trip_id: tripId,
+            user_id: userId,
+          }),
+        });
+
+        if (resp.ok) {
+          const data = await resp.json();
+          const replyText = data.response || data.reply || 'Your travel inquiry has been processed.';
+          const sources: SourceCitation[] = data.sources || [];
+
+          if (data.itinerary && Array.isArray(data.itinerary) && data.itinerary.length > 0) {
+            setItinerary(data.itinerary);
+          }
+
+          setMessages((prev) => [
+            ...prev,
+            {
+              role: 'assistant',
+              text: replyText,
+              time: new Date().toLocaleTimeString(),
+              sources: sources,
+            },
+          ]);
+        } else {
+          const errData = await resp.json().catch(() => ({}));
+          const errMsg = errData.error?.message || `Server returned HTTP ${resp.status}`;
+          setStreamError(errMsg);
+        }
+      } catch (err) {
+        setStreamError(`Network failure communicating with ZICO backend: ${String(err)}`);
+      } finally {
+        setIsProcessing(false);
+      }
+    }
   };
 
   // Human-in-the-Loop decision submission
   const handleDecision = (approved: boolean) => {
-    if (!activeInterrupt || !socket || !isConnected) return;
+    if (!activeInterrupt) return;
 
-    const payload = {
-      type: 'decision',
-      approved,
-      action_id: activeInterrupt.action_id,
-      actor: userId,
-      trip_id: tripId,
-    };
-
-    console.log('[CLIENT] Submitting HITL decision:', payload);
-    socket.send(JSON.stringify(payload));
+    if (socket && isConnected) {
+      const payload = {
+        type: 'decision',
+        approved,
+        action_id: activeInterrupt.action_id,
+        actor: userId,
+        trip_id: tripId,
+      };
+      socket.send(JSON.stringify(payload));
+    }
 
     setMessages((prev) => [
       ...prev,
@@ -292,9 +414,9 @@ export function Timeline({
   };
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 h-[calc(100vh-5rem)]">
+    <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 h-[calc(100vh-6rem)]">
       {/* Left Column: Itinerary Timeline */}
-      <div className="lg:col-span-5 flex flex-col bg-slate-900/60 backdrop-blur border border-slate-800 rounded-2xl p-5 overflow-hidden">
+      <div className="lg:col-span-5 flex flex-col bg-slate-900/60 backdrop-blur border border-slate-800 rounded-2xl p-5 overflow-hidden shadow-xl">
         <div className="flex items-center justify-between pb-4 border-b border-slate-800">
           <div className="flex items-center gap-2">
             <Calendar className="w-5 h-5 text-blue-400" />
@@ -309,8 +431,10 @@ export function Timeline({
           {itinerary.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-48 text-center text-slate-400">
               <Calendar className="w-10 h-10 mb-2 text-slate-600" />
-              <p className="text-sm">No scheduled segments yet.</p>
-              <p className="text-xs text-slate-500">Ask ZICO to search flights or plan your itinerary.</p>
+              <p className="text-sm font-medium">No scheduled segments yet.</p>
+              <p className="text-xs text-slate-500 mt-1 max-w-xs">
+                Ask ZICO to search live flights or build a custom multi-day travel itinerary.
+              </p>
             </div>
           ) : (
             itinerary.map((seg, idx) => (
@@ -339,7 +463,7 @@ export function Timeline({
                         <MapPin className="w-3 h-3 text-slate-500" />
                         <span>{seg.location.name}</span>
                         {seg.location.iata_code && (
-                          <span className="font-mono text-slate-400">({seg.location.iata_code})</span>
+                          <span className="font-mono text-blue-400 font-medium">({seg.location.iata_code})</span>
                         )}
                       </div>
                     </div>
@@ -374,23 +498,22 @@ export function Timeline({
       </div>
 
       {/* Right Column: Conversational Stream & HITL Approvals */}
-      <div className="lg:col-span-7 flex flex-col bg-slate-900/60 backdrop-blur border border-slate-800 rounded-2xl p-5 overflow-hidden">
+      <div className="lg:col-span-7 flex flex-col bg-slate-900/60 backdrop-blur border border-slate-800 rounded-2xl p-5 overflow-hidden shadow-xl">
         {/* Header with Connection Status & Active Execution Indicator */}
         <div className="flex items-center justify-between pb-4 border-b border-slate-800">
           <div className="flex items-center gap-3">
             <div
-              className={`w-2.5 h-2.5 rounded-full ${isConnected ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500'}`}
+              className={`w-2.5 h-2.5 rounded-full ${isConnected ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'}`}
             />
             <div>
-              <h2 className="text-lg font-semibold text-slate-100">Orchestration Stream</h2>
+              <h2 className="text-lg font-semibold text-slate-100">Operations Assistant</h2>
               <p className="text-xs text-slate-400 font-mono">
-                {isConnected ? 'LIVE WEBSOCKET STREAMING' : 'DISCONNECTED'}
+                {isConnected ? 'LIVE WEBSOCKET STREAMING' : 'HTTP REST FALLBACK ACTIVE'}
               </p>
             </div>
           </div>
 
           <div className="flex items-center gap-2">
-            {/* Active Tool Call Indicator */}
             {activeToolCall && (
               <div className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-amber-950/80 border border-amber-800/70 text-xs text-amber-300 shadow-sm animate-pulse">
                 <Wrench className="w-3.5 h-3.5 text-amber-400 animate-spin" />
@@ -398,7 +521,6 @@ export function Timeline({
               </div>
             )}
 
-            {/* Active Worker Node Indicator */}
             {activeWorkerNode && !activeToolCall && (
               <div className="flex items-center gap-2 px-3 py-1 rounded-lg bg-blue-950/80 border border-blue-800/60 text-xs text-blue-300 shadow-sm">
                 <Radio className="w-3.5 h-3.5 animate-spin text-blue-400" />
@@ -414,7 +536,7 @@ export function Timeline({
             <div className="flex items-start gap-2.5">
               <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
               <div>
-                <h4 className="text-xs font-semibold text-rose-100">Communication Error</h4>
+                <h4 className="text-xs font-semibold text-rose-100">Operational Notice</h4>
                 <p className="text-xs text-rose-300/90 mt-0.5 font-mono">{streamError}</p>
               </div>
             </div>
@@ -430,6 +552,16 @@ export function Timeline({
 
         {/* Stream Messages Container */}
         <div className="flex-1 overflow-y-auto py-4 space-y-4 pr-1">
+          {messages.length === 0 && (
+            <div className="flex flex-col items-center justify-center h-48 text-center text-slate-400">
+              <Sparkles className="w-8 h-8 mb-2 text-blue-400/60" />
+              <p className="text-sm font-medium text-slate-300">Welcome to ZICO</p>
+              <p className="text-xs text-slate-500 mt-1 max-w-sm">
+                Try asking: &quot;Find flights from BOM to DXB next Friday&quot; or &quot;What are the EU261 flight cancellation rules?&quot;
+              </p>
+            </div>
+          )}
+
           {messages.map((msg, i) => (
             <div
               key={i}
@@ -459,6 +591,30 @@ export function Timeline({
                     </div>
                   )}
                   <p className="whitespace-pre-wrap">{msg.text}</p>
+
+                  {/* Clickable Research & Live Sources Badges */}
+                  {msg.sources && msg.sources.length > 0 && (
+                    <div className="mt-3 pt-2.5 border-t border-slate-700/60">
+                      <span className="text-[10px] font-medium text-slate-400 uppercase tracking-wider block mb-1.5">
+                        Verified Sources
+                      </span>
+                      <div className="flex flex-wrap gap-1.5">
+                        {msg.sources.map((src, sIdx) => (
+                          <a
+                            key={sIdx}
+                            href={src.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-slate-900/80 hover:bg-slate-900 text-blue-300 hover:text-blue-200 border border-slate-700/80 text-[11px] transition-colors"
+                          >
+                            <ExternalLink className="w-2.5 h-2.5" />
+                            <span className="truncate max-w-[180px]">{src.title}</span>
+                          </a>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
                   <span className="text-[10px] opacity-60 block text-right mt-1.5">{msg.time}</span>
                 </div>
               )}
@@ -512,26 +668,51 @@ export function Timeline({
           {isProcessing && !activeInterrupt && !streamingTokenMessage && (
             <div className="flex items-center gap-2 text-xs text-slate-400 animate-pulse pl-1">
               <Radio className="w-3.5 h-3.5 animate-spin text-blue-400" />
-              <span>ZICO is reasoning across agents...</span>
+              <span>ZICO is reasoning across domain agents...</span>
             </div>
           )}
 
           <div ref={messagesEndRef} />
         </div>
 
-        {/* Input Controls */}
+        {/* Input Controls with Voice Transcription Support */}
         <form onSubmit={handleSendPrompt} className="pt-3 border-t border-slate-800 flex items-center gap-2">
-          <input
-            type="text"
-            value={promptInput}
-            onChange={(e) => setPromptInput(e.target.value)}
-            placeholder="Ask ZICO (e.g. 'Search flights from Mumbai to Pune')..."
-            className="flex-1 bg-slate-800/80 border border-slate-700/80 rounded-xl px-4 py-2.5 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
-            disabled={!isConnected || isProcessing}
-          />
+          {/* Microphone Recording Button */}
+          <button
+            type="button"
+            onClick={handleToggleVoiceRecording}
+            className={`p-2.5 rounded-xl border transition-all ${
+              isRecording
+                ? 'bg-rose-600 text-white border-rose-500 animate-pulse'
+                : 'bg-slate-800/80 hover:bg-slate-700/80 text-slate-300 border-slate-700/80'
+            }`}
+            title={isRecording ? 'Stop Recording' : 'Voice Input (Whisper)'}
+          >
+            {isRecording ? <MicOff className="w-4 h-4 text-white" /> : <Mic className="w-4 h-4" />}
+          </button>
+
+          {isRecording ? (
+            <div className="flex-1 bg-slate-800/80 border border-rose-500/60 rounded-xl px-4 py-2.5 text-sm text-rose-300 flex items-center justify-between animate-pulse">
+              <span className="flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-rose-500 animate-ping" />
+                Listening... Speak your travel query
+              </span>
+              <span className="font-mono text-xs text-rose-400">{recordingSeconds}s</span>
+            </div>
+          ) : (
+            <input
+              type="text"
+              value={promptInput}
+              onChange={(e) => setPromptInput(e.target.value)}
+              placeholder="Ask ZICO (e.g. 'Find flights from Mumbai to Dubai')..."
+              className="flex-1 bg-slate-800/80 border border-slate-700/80 rounded-xl px-4 py-2.5 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+              disabled={isProcessing}
+            />
+          )}
+
           <button
             type="submit"
-            disabled={!isConnected || !promptInput.trim() || isProcessing}
+            disabled={!promptInput.trim() || isProcessing}
             className="p-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:hover:bg-blue-600 text-white shadow-md transition-all"
           >
             <Send className="w-4 h-4" />
@@ -541,4 +722,3 @@ export function Timeline({
     </div>
   );
 }
-

@@ -38,6 +38,20 @@ export interface InterruptEvent {
   requires_explicit_approval: boolean;
 }
 
+export interface SourceCitation {
+  title: string;
+  url: string;
+  score?: number;
+}
+
+export interface ChatMessage {
+  role: 'user' | 'assistant' | 'system';
+  text: string;
+  node?: string;
+  time: string;
+  sources?: SourceCitation[];
+}
+
 export interface StreamEvent {
   type:
     | 'node_update'
@@ -62,5 +76,5 @@ export interface StreamEvent {
   tool?: string;
   input?: any;
   itinerary?: TripSegment[];
+  sources?: SourceCitation[];
 }
-
