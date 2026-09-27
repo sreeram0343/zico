@@ -46,6 +46,15 @@ from app.api.schemas import (
     TravelRequest,
     TravelResponse,
 )
+from app.core.exceptions import (
+    ExternalServiceError,
+    ProviderError,
+    RoutingError,
+    ZicoError,
+)
+from app.core.exceptions import (
+    ValidationError as ZicoValidationError,
+)
 from app.core.logging import get_logger
 from app.core.request_context import (
     get_request_id,
@@ -168,22 +177,33 @@ def _extract_errors(state: Dict[str, Any]) -> List[APIError]:
         List of client-safe APIError objects.
     """
     api_errors: List[APIError] = []
+    req_id = state.get("request_id")
 
     # Application and provider operational errors
     for err in state.get("errors", []):
-        if isinstance(err, str):
+        if isinstance(err, ZicoError):
+            api_errors.append(
+                APIError(
+                    code=err.code,
+                    message=err.get_safe_message(),
+                    request_id=req_id,
+                )
+            )
+        elif isinstance(err, str):
             clean_msg = _sanitize_error_text(err)
             err_lower = err.lower()
             is_provider = any(
                 p in err_lower for p in ["provider", "outage", "timeout", "unavailable", "network"]
             )
             code = APIErrorCode.PROVIDER_UNAVAILABLE if is_provider else APIErrorCode.INTERNAL_ERROR
-            api_errors.append(APIError(code=code, message=clean_msg))
+            api_errors.append(APIError(code=code, message=clean_msg, request_id=req_id))
         elif isinstance(err, dict):
             try:
                 dict_copy = dict(err)
                 if "message" in dict_copy and isinstance(dict_copy["message"], str):
                     dict_copy["message"] = _sanitize_error_text(dict_copy["message"])
+                if "request_id" not in dict_copy and req_id:
+                    dict_copy["request_id"] = req_id
                 api_errors.append(APIError.model_validate(dict_copy))
             except Exception:
                 pass
@@ -196,6 +216,7 @@ def _extract_errors(state: Dict[str, Any]) -> List[APIError]:
                     APIError(
                         code=APIErrorCode.VALIDATION_FAILED,
                         message=_sanitize_error_text(val_err),
+                        request_id=req_id,
                     )
                 )
 
@@ -205,6 +226,7 @@ def _extract_errors(state: Dict[str, Any]) -> List[APIError]:
 @router.post(
     "/chat",
     response_model=TravelResponse,
+    response_model_exclude_none=True,
     status_code=status.HTTP_200_OK,
     summary="Execute ZICO Travel Operations Workflow",
     description="Processes a validated natural-language travel inquiry through the ZICO multi-agent LangGraph workflow.",
@@ -231,7 +253,9 @@ async def chat_endpoint(
     """
     # 1. Establish session context and unique trace identifier
     request_id: str = get_request_id() or f"req_{uuid.uuid4().hex[:12]}"
-    session_id: str = request.session_id or get_session_id() or f"sess_{uuid.uuid4().hex[:12]}"
+    session_id: str = (
+        request.session_id or request.trip_id or get_session_id() or f"sess_{uuid.uuid4().hex[:12]}"
+    )
 
     # Synchronize resolved IDs with active execution context
     set_request_context(request_id=request_id, session_id=session_id)
@@ -251,6 +275,12 @@ async def chat_endpoint(
         session_id=session_id,
         request_id=request_id,
     )
+    if request.user_id:
+        initial_state["user_id"] = request.user_id
+    if request.location:
+        initial_state["origin"] = request.location
+    if request.context:
+        initial_state["metadata"] = request.context
 
     # 3. Execute the assembled LangGraph workflow asynchronously
     logger.info("Starting ZICO workflow execution (request_id=%s)", request_id)
@@ -266,31 +296,50 @@ async def chat_endpoint(
         )
 
         exc_name_lower = exc_type_name.lower()
-        is_provider_down = any(
+        is_provider_down = isinstance(exc, (ProviderError, ExternalServiceError)) or any(
             k in exc_name_lower
             for k in ["provider", "timeout", "connection", "service", "unavailable"]
         )
 
-        http_status = (
-            status.HTTP_503_SERVICE_UNAVAILABLE
-            if is_provider_down
-            else status.HTTP_500_INTERNAL_SERVER_ERROR
-        )
-        api_code = (
-            APIErrorCode.PROVIDER_UNAVAILABLE if is_provider_down else APIErrorCode.INTERNAL_ERROR
-        )
-        safe_message = (
-            "A travel provider service is temporarily unavailable. Please try again shortly."
-            if is_provider_down
-            else "An unexpected error occurred while processing the travel request."
-        )
+        if isinstance(exc, ZicoValidationError):
+            http_status = status.HTTP_400_BAD_REQUEST
+            api_code = APIErrorCode.VALIDATION_FAILED
+            safe_message = exc.get_safe_message()
+        elif isinstance(exc, RoutingError):
+            http_status = status.HTTP_400_BAD_REQUEST
+            api_code = APIErrorCode.INVALID_REQUEST
+            safe_message = exc.get_safe_message()
+        elif is_provider_down:
+            http_status = status.HTTP_503_SERVICE_UNAVAILABLE
+            api_code = APIErrorCode.PROVIDER_UNAVAILABLE
+            safe_message = (
+                exc.get_safe_message()
+                if isinstance(exc, ZicoError)
+                else "A travel provider service is temporarily unavailable. Please try again shortly."
+            )
+        elif isinstance(exc, ZicoError):
+            http_status = exc.http_status_code
+            api_code = APIErrorCode.INTERNAL_ERROR
+            safe_message = exc.get_safe_message()
+        else:
+            http_status = status.HTTP_500_INTERNAL_SERVER_ERROR
+            api_code = APIErrorCode.INTERNAL_ERROR
+            safe_message = "An unexpected error occurred while processing the travel request."
 
+        error_item = APIError(
+            code=api_code,
+            message=safe_message,
+            request_id=request_id,
+        )
         error_response = TravelResponse(
             response=safe_message,
             session_id=session_id,
             status=ResponseStatus.ERROR,
             sources=[],
-            errors=[APIError(code=api_code, message=safe_message)],
+            errors=[error_item],
+            reply=safe_message,
+            trip_id=session_id,
+            user_id=request.user_id or "user_default",
         )
         return JSONResponse(
             status_code=http_status,
@@ -319,6 +368,14 @@ async def chat_endpoint(
         status=response_status,
         sources=sources,
         errors=errors,
+        reply=final_response_text if request.trip_id else None,
+        trip_id=request.trip_id if request.trip_id else None,
+        user_id=request.user_id if request.trip_id else None,
+        itinerary=(final_state.get("itinerary") or []) if request.trip_id else None,
+        pending_actions=(final_state.get("pending_actions") or []) if request.trip_id else None,
+        active_disruptions=(final_state.get("active_disruptions") or [])
+        if request.trip_id
+        else None,
     )
 
     logger.info(

@@ -21,6 +21,7 @@ import httpx
 from pydantic import BaseModel, Field
 
 from app.core.config import settings
+from app.core.exceptions import ConfigurationError, ExternalServiceError, ValidationError
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
@@ -29,21 +30,20 @@ logger = get_logger(__name__)
 DEFAULT_TAVILY_ENDPOINT = "https://api.tavily.com/search"
 DEFAULT_TIMEOUT_SECONDS = 10.0
 
-
 # ---------------------------------------------------------------------------
 # Exceptions
 # ---------------------------------------------------------------------------
 
 
-class TavilySearchError(Exception):
+class TavilySearchError(ExternalServiceError):
     """Base exception for all Tavily search operations."""
 
 
-class TavilyConfigError(TavilySearchError):
+class TavilyConfigError(TavilySearchError, ConfigurationError):
     """Raised when the Tavily API key or configuration is missing or invalid."""
 
 
-class TavilyValidationError(TavilySearchError, ValueError):
+class TavilyValidationError(TavilySearchError, ValidationError, ValueError):
     """Raised when search query parameters fail validation before execution."""
 
 
@@ -60,7 +60,10 @@ class TavilyHTTPError(TavilySearchError):
     """Raised when an HTTP error status (4xx/5xx) is received from Tavily."""
 
     def __init__(self, status_code: int, message: str) -> None:
-        super().__init__(f"Tavily HTTP error {status_code}: {message}")
+        super().__init__(
+            f"Tavily HTTP error {status_code}: {message}",
+            http_status_code=503 if status_code >= 500 else status_code,
+        )
         self.status_code = status_code
         self.message = message
 

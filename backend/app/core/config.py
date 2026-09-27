@@ -63,6 +63,18 @@ class Settings(BaseSettings):
     ELEVENLABS_API_KEY: str = Field(default="")
     ELEVENLABS_VOICE_ID: str = Field(default="21m00Tcm4TlvDq8ikWAM")
 
+    # Rate Limiting & Abuse Protection
+    RATE_LIMIT_ENABLED: bool = Field(default=True, description="Enable request rate limiting.")
+    RATE_LIMIT_PER_MINUTE: int = Field(
+        default=60, ge=1, le=1000, description="Max requests per minute per IP."
+    )
+
+    # Service Timeouts (Seconds)
+    OPENAI_TIMEOUT_SECONDS: float = Field(default=15.0, ge=1.0, le=60.0)
+    AVIATIONSTACK_TIMEOUT_SECONDS: float = Field(default=10.0, ge=1.0, le=60.0)
+    TAVILY_TIMEOUT_SECONDS: float = Field(default=10.0, ge=1.0, le=60.0)
+    QDRANT_TIMEOUT_SECONDS: float = Field(default=5.0, ge=1.0, le=30.0)
+
     # CORS Allowed Origins
     CORS_ORIGINS: List[str] = Field(
         default_factory=lambda: [

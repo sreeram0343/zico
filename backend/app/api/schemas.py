@@ -24,7 +24,7 @@ Design Principles:
 from __future__ import annotations
 
 from enum import Enum
-from typing import Any, List, Optional, Union
+from typing import Any, Dict, List, Optional, Union
 
 from pydantic import (
     BaseModel,
@@ -45,6 +45,7 @@ __all__ = [
     "ResponseStatus",
     "APIErrorCode",
     "APIError",
+    "ErrorResponse",
     "Source",
     "TravelRequest",
     "TravelResponse",
@@ -76,13 +77,34 @@ class APIErrorCode(str, Enum):
         PROVIDER_UNAVAILABLE: External flight or research provider service outage.
         VALIDATION_FAILED: Safety or business rule violation on traveler parameters.
         INTERNAL_ERROR: Unexpected system or execution failure.
+        ZICO_VALIDATION_ERROR: Canonical validation failure code.
+        ZICO_ROUTING_ERROR: Canonical routing failure code.
+        ZICO_WORKFLOW_ERROR: Canonical workflow execution failure code.
+        ZICO_AGENT_ERROR: Canonical agent execution failure code.
+        ZICO_PROVIDER_ERROR: Canonical provider failure code.
+        ZICO_TOOL_ERROR: Canonical tool execution failure code.
+        ZICO_EXTERNAL_SERVICE_ERROR: Canonical external service outage code.
+        ZICO_CONFIGURATION_ERROR: Canonical configuration failure code.
+        ZICO_INTERNAL_ERROR: Canonical internal system failure code.
     """
 
+    # Backward-compatible codes
     INVALID_REQUEST = "INVALID_REQUEST"
     MISSING_INFORMATION = "MISSING_INFORMATION"
     PROVIDER_UNAVAILABLE = "PROVIDER_UNAVAILABLE"
     VALIDATION_FAILED = "VALIDATION_FAILED"
     INTERNAL_ERROR = "INTERNAL_ERROR"
+
+    # Canonical ZICO machine-readable error codes
+    ZICO_VALIDATION_ERROR = "ZICO_VALIDATION_ERROR"
+    ZICO_ROUTING_ERROR = "ZICO_ROUTING_ERROR"
+    ZICO_WORKFLOW_ERROR = "ZICO_WORKFLOW_ERROR"
+    ZICO_AGENT_ERROR = "ZICO_AGENT_ERROR"
+    ZICO_PROVIDER_ERROR = "ZICO_PROVIDER_ERROR"
+    ZICO_TOOL_ERROR = "ZICO_TOOL_ERROR"
+    ZICO_EXTERNAL_SERVICE_ERROR = "ZICO_EXTERNAL_SERVICE_ERROR"
+    ZICO_CONFIGURATION_ERROR = "ZICO_CONFIGURATION_ERROR"
+    ZICO_INTERNAL_ERROR = "ZICO_INTERNAL_ERROR"
 
 
 class APIError(BaseModel):
@@ -92,17 +114,47 @@ class APIError(BaseModel):
     Attributes:
         code: Machine-readable standardized error code.
         message: Human-readable, non-sensitive explanation of the error.
+        request_id: Optional traceable request identifier associated with the error.
+        details: Optional client-safe additional error context or diagnostic items.
     """
 
     code: Union[APIErrorCode, str] = Field(
         ...,
         description="Standardized machine-readable error code.",
-        examples=["INVALID_REQUEST", "PROVIDER_UNAVAILABLE"],
+        examples=["INVALID_REQUEST", "ZICO_PROVIDER_ERROR"],
     )
     message: str = Field(
         ...,
         description="Human-readable, non-sensitive explanation of the error.",
         examples=["Flight provider service temporarily unavailable."],
+    )
+    request_id: Optional[str] = Field(
+        default=None,
+        description="Traceable request identifier associated with the error.",
+        examples=["req_123456"],
+    )
+    details: Optional[Any] = Field(
+        default=None,
+        description="Client-safe additional error context, if any.",
+    )
+
+    model_config = ConfigDict(
+        extra="forbid",
+        str_strip_whitespace=True,
+    )
+
+
+class ErrorResponse(BaseModel):
+    """
+    Standardized API top-level error response model.
+
+    Attributes:
+        error: Client-safe structured error description.
+    """
+
+    error: APIError = Field(
+        ...,
+        description="Structured client-safe error details.",
     )
 
     model_config = ConfigDict(
@@ -162,6 +214,24 @@ class TravelRequest(BaseModel):
         description="Optional conversation session identifier for ongoing interaction.",
         examples=["test-session-01"],
     )
+    trip_id: Optional[str] = Field(
+        default=None,
+        description="Optional active trip session identifier (synonym for session_id).",
+        examples=["trip_demo_01"],
+    )
+    user_id: Optional[str] = Field(
+        default="user_default",
+        description="Optional traveler user identifier.",
+        examples=["user_01"],
+    )
+    context: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Optional situational travel context.",
+    )
+    location: Optional[str] = Field(
+        default=None,
+        description="Optional traveler location or departure point.",
+    )
 
     model_config = ConfigDict(
         extra="forbid",
@@ -215,6 +285,27 @@ class TravelRequest(BaseModel):
 
         return trimmed
 
+    @field_validator("trip_id", mode="before")
+    @classmethod
+    def validate_and_sanitize_trip_id(cls, value: Any) -> Optional[str]:
+        """Validate and normalize the optional trip ID."""
+        if value is None:
+            return None
+
+        if not isinstance(value, str):
+            raise ValueError("trip_id must be a string.")
+
+        trimmed = value.strip()
+        if not trimmed:
+            raise ValueError("trip_id cannot be an empty or whitespace-only string.")
+
+        if len(trimmed) > MAX_SESSION_ID_LENGTH:
+            raise ValueError(
+                f"trip_id exceeds maximum permitted length of {MAX_SESSION_ID_LENGTH} characters."
+            )
+
+        return trimmed
+
 
 class TravelResponse(BaseModel):
     """
@@ -226,6 +317,12 @@ class TravelResponse(BaseModel):
         status: High-level operational status ('success', 'partial', 'error').
         sources: List of verified research source citations.
         errors: List of standardized operational errors, if any occurred.
+        reply: Echo of response text for ChatResponse schema compatibility.
+        trip_id: Echo of session_id for ChatResponse schema compatibility.
+        user_id: Associated traveler user identifier.
+        active_disruptions: List of active disruptions identified during operations.
+        pending_actions: List of HITL pending actions.
+        itinerary: List of trip itinerary segments.
     """
 
     response: str = Field(
@@ -250,6 +347,30 @@ class TravelResponse(BaseModel):
     errors: List[APIError] = Field(
         default_factory=list,
         description="Standardized client-safe operational errors, if any.",
+    )
+    reply: Optional[str] = Field(
+        default=None,
+        description="Echo of response text for ChatResponse schema compatibility.",
+    )
+    trip_id: Optional[str] = Field(
+        default=None,
+        description="Echo of session_id for ChatResponse schema compatibility.",
+    )
+    user_id: Optional[str] = Field(
+        default=None,
+        description="Associated traveler user identifier.",
+    )
+    active_disruptions: Optional[List[Dict[str, Any]]] = Field(
+        default=None,
+        description="Active disruptions identified during travel operations.",
+    )
+    pending_actions: Optional[List[Any]] = Field(
+        default=None,
+        description="Human-in-the-Loop pending actions requiring traveler confirmation.",
+    )
+    itinerary: Optional[List[Any]] = Field(
+        default=None,
+        description="Current trip itinerary segments.",
     )
 
     model_config = ConfigDict(

@@ -29,6 +29,7 @@ import airportsdata
 import pycountry
 from pydantic import BaseModel, Field
 
+from app.core.exceptions import ToolError
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
@@ -116,7 +117,7 @@ def _is_military_facility(name: Optional[str]) -> bool:
 # ---------------------------------------------------------------------------
 
 
-class LocationResolutionError(Exception):
+class LocationResolutionError(ToolError):
     """Raised when an underlying data source failure or operational error occurs."""
 
 

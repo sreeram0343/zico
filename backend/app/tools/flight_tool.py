@@ -14,6 +14,7 @@ import requests
 from dotenv import load_dotenv
 from langchain_core.tools import tool
 
+from app.core.exceptions import ToolError, ValidationError
 from app.graph.state import Location, SegmentType, TripSegment
 
 # Load environment variables
@@ -34,19 +35,18 @@ DEFAULT_ORIGIN_IATA = os.getenv("DEFAULT_ORIGIN_IATA", "DAC").strip().strip('"')
 _API_CACHE: Dict[str, Tuple[float, Dict[str, Any]]] = {}
 _CACHE_TTL_SECONDS = 300  # 5 minutes cache to prevent quota exhaustion and 429 rate limits
 
-
 # ---------------------------------------------------------------------------
 # Exceptions
 # ---------------------------------------------------------------------------
 
 
-class FlightToolError(Exception):
+class FlightToolError(ToolError):
     """Base exception for flight tool operations."""
 
     pass
 
 
-class FlightToolValidationError(ValueError):
+class FlightToolValidationError(FlightToolError, ValidationError, ValueError):
     """Raised when flight data fails validation or has malformed timestamps/chronology."""
 
     pass

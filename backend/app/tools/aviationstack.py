@@ -22,6 +22,7 @@ import httpx
 from pydantic import BaseModel, Field
 
 from app.core.config import settings
+from app.core.exceptions import ConfigurationError, ExternalServiceError
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
@@ -34,17 +35,16 @@ logging.getLogger("httpcore").setLevel(logging.WARNING)
 DEFAULT_BASE_URL = "https://api.aviationstack.com/v1"
 DEFAULT_TIMEOUT_SECONDS = 10.0
 
-
 # ---------------------------------------------------------------------------
 # Exceptions
 # ---------------------------------------------------------------------------
 
 
-class AviationStackError(Exception):
+class AviationStackError(ExternalServiceError):
     """Base exception for all AviationStack operations."""
 
 
-class AviationStackConfigError(AviationStackError):
+class AviationStackConfigError(AviationStackError, ConfigurationError):
     """Raised when API key or required client configuration is missing or invalid."""
 
 
@@ -61,7 +61,10 @@ class AviationStackHTTPError(AviationStackError):
     """Raised when an HTTP error status (4xx/5xx) is received from the endpoint."""
 
     def __init__(self, status_code: int, message: str) -> None:
-        super().__init__(f"AviationStack HTTP error {status_code}: {message}")
+        super().__init__(
+            f"AviationStack HTTP error {status_code}: {message}",
+            http_status_code=503 if status_code >= 500 else status_code,
+        )
         self.status_code = status_code
         self.message = message
 

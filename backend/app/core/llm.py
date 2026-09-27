@@ -24,6 +24,7 @@ from typing import Any, Optional
 from langchain_openai import ChatOpenAI
 
 from app.core.config import settings
+from app.core.exceptions import ConfigurationError
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
@@ -32,7 +33,7 @@ logger = get_logger(__name__)
 DEFAULT_TEMPERATURE: float = 0.0
 
 
-class LLMConfigurationError(ValueError):
+class LLMConfigurationError(ConfigurationError, ValueError):
     """Raised when the LLM provider configuration is missing, invalid, or fails."""
 
 
