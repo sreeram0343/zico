@@ -50,12 +50,9 @@ async def client():
 
 @pytest.mark.asyncio
 async def test_root_endpoint(client: AsyncClient):
-    """Verify root API returns system metadata and status."""
+    """Verify root API returns 404 ensuring strict /api/v1 routing boundary."""
     resp = await client.get("/")
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["status"] == "operational"
-    assert "Phase 1" in data["phase"]
+    assert resp.status_code == 404
 
 
 @pytest.mark.asyncio
