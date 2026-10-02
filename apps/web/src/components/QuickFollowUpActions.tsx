@@ -10,50 +10,60 @@ interface FollowUpAction {
   icon: React.ComponentType<{ className?: string }>;
 }
 
-const DEFAULT_FOLLOW_UPS: FollowUpAction[] = [
+export interface QuickAction {
+  id: string;
+  label: string;
+  query: string;
+  icon?: string;
+}
+
+const DEFAULT_FOLLOW_UPS: QuickAction[] = [
   {
     id: 'return',
     label: 'Show return flights',
     query: 'Show return flights from Dubai to Kochi next week',
-    icon: RotateCcw,
   },
   {
     id: 'compare',
     label: 'Compare airlines',
     query: 'Compare Emirates and IndiGo flights on this route',
-    icon: Scale,
   },
   {
     id: 'baggage',
     label: 'Check baggage policy',
     query: 'Check the baggage policy for these flights',
-    icon: Luggage,
   },
   {
     id: 'hotels',
     label: 'Find hotels in Dubai',
     query: 'Hotels in Dubai under 15k',
-    icon: Bed,
   },
 ];
 
 interface QuickFollowUpActionsProps {
   onSelectAction: (query: string) => void;
   disabled?: boolean;
+  actions?: QuickAction[];
 }
 
 export function QuickFollowUpActions({
   onSelectAction,
   disabled,
+  actions,
 }: QuickFollowUpActionsProps) {
+  const displayActions = actions && actions.length > 0 ? actions : DEFAULT_FOLLOW_UPS;
   return (
     <div
       className="mt-3 flex items-center gap-2 overflow-x-auto pb-1 no-scrollbar"
       role="toolbar"
       aria-label="Quick follow-up options"
     >
-      {DEFAULT_FOLLOW_UPS.map((item) => {
-        const Icon = item.icon;
+      {displayActions.map((item) => {
+        let Icon = RotateCcw;
+        if (item.id === 'compare') Icon = Scale;
+        else if (item.id === 'baggage') Icon = Luggage;
+        else if (item.id === 'hotels' || item.id.includes('hotel')) Icon = Bed;
+
         return (
           <button
             key={item.id}

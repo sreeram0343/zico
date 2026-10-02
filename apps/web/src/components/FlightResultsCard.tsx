@@ -11,68 +11,7 @@ interface FlightResultsCardProps {
   date?: string;
 }
 
-const DEFAULT_DEMO_FLIGHTS: FlightOption[] = [
-  {
-    id: 'f1',
-    airline: 'Emirates',
-    flightNumber: 'EK-523',
-    departure: '10:35',
-    departureAirport: 'COK',
-    arrival: '12:55',
-    arrivalAirport: 'DXB',
-    duration: '4h 20m',
-    stops: 'Non-stop',
-    price: '₹ 18,450',
-    aircraft: 'Boeing 777-300ER',
-    baggage: '30 kg check-in, 7 kg cabin',
-    cabin: 'Economy',
-  },
-  {
-    id: 'f2',
-    airline: 'IndiGo',
-    flightNumber: '6E-1451',
-    departure: '12:10',
-    departureAirport: 'COK',
-    arrival: '16:35',
-    arrivalAirport: 'DXB',
-    duration: '4h 25m',
-    stops: 'Non-stop',
-    price: '₹ 16,900',
-    aircraft: 'Airbus A321neo',
-    baggage: '30 kg check-in, 7 kg cabin',
-    cabin: 'Economy',
-  },
-  {
-    id: 'f3',
-    airline: 'Air India',
-    flightNumber: 'AI-933',
-    departure: '14:20',
-    departureAirport: 'COK',
-    arrival: '19:00',
-    arrivalAirport: 'DXB',
-    duration: '4h 40m',
-    stops: 'Non-stop',
-    price: '₹ 17,850',
-    aircraft: 'Boeing 787-8 Dreamliner',
-    baggage: '25 kg check-in, 7 kg cabin',
-    cabin: 'Economy',
-  },
-  {
-    id: 'f4',
-    airline: 'flydubai',
-    flightNumber: 'FZ-454',
-    departure: '18:50',
-    departureAirport: 'COK',
-    arrival: '23:20',
-    arrivalAirport: 'DXB',
-    duration: '4h 30m',
-    stops: 'Non-stop',
-    price: '₹ 15,600',
-    aircraft: 'Boeing 737 MAX 8',
-    baggage: '20 kg check-in, 7 kg cabin',
-    cabin: 'Economy',
-  },
-];
+
 
 function getAirlineBadge(airline: string) {
   const lower = airline.toLowerCase();
@@ -105,14 +44,17 @@ function getAirlineBadge(airline: string) {
 }
 
 export function FlightResultsCard({ flights }: FlightResultsCardProps) {
-  const displayFlights = flights && flights.length > 0 ? flights : DEFAULT_DEMO_FLIGHTS;
+  if (!flights || flights.length === 0) {
+    return null;
+  }
+
   const [selectedFlight, setSelectedFlight] = useState<FlightOption | null>(null);
 
   return (
     <div className="mt-4 bg-white rounded-2xl border border-[#E5E7EB] p-3 sm:p-4 shadow-sm w-full">
       {/* Flight Rows */}
       <div className="divide-y divide-[#F2F4F7]">
-        {displayFlights.map((flight, idx) => (
+        {flights.map((flight, idx) => (
           <div
             key={flight.id || `flight-${idx}`}
             className="py-3 px-1 sm:px-2 flex flex-col md:flex-row md:items-center justify-between gap-3 hover:bg-[#FFFDF7] rounded-xl transition-colors"
@@ -192,7 +134,7 @@ export function FlightResultsCard({ flights }: FlightResultsCardProps) {
           <Info className="w-3.5 h-3.5 text-[#D99E10] shrink-0" />
           <span>Prices are approximate and may change. Please check with the airline for the latest details.</span>
         </div>
-        <span className="text-[#98A2B3] shrink-0 font-medium">10:24 AM</span>
+        <span className="text-[#98A2B3] shrink-0 font-medium">Live via AviationStack</span>
       </div>
 
       {/* Modal Dialog for View Details */}

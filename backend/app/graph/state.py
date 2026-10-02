@@ -361,6 +361,8 @@ class ZicoGraphState(BaseModel):
     constraints: TripConstraints = Field(default_factory=TripConstraints)
     pending_actions: List[PendingAction] = Field(default_factory=list)
     active_disruptions: List[Dict[str, Any]] = Field(default_factory=list)
+    flight_search_results: Dict[str, Any] = Field(default_factory=dict)
+    quick_actions: List[Dict[str, str]] = Field(default_factory=list)
     next_node: Optional[str] = None
 
     def to_trip_state(self, title: str = "Active Journey") -> TripState:

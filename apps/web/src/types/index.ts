@@ -50,6 +50,8 @@ export interface ChatMessage {
   node?: string;
   time: string;
   sources?: SourceCitation[];
+  flight_search_results?: any;
+  quick_actions?: { id: string; label: string; query: string; icon?: string }[];
 }
 
 export interface StreamEvent {
@@ -77,6 +79,8 @@ export interface StreamEvent {
   input?: any;
   itinerary?: TripSegment[];
   sources?: SourceCitation[];
+  flight_search_results?: any;
+  quick_actions?: { id: string; label: string; query: string; icon?: string }[];
 }
 
 export interface FlightOption {

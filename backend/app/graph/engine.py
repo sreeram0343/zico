@@ -174,7 +174,7 @@ def input_node(state: ZicoGraphState | Dict[str, Any]) -> Dict[str, Any]:
         elif isinstance(msg, BaseMessage):
             normalized_messages.append(msg)
 
-    return {"messages": normalized_messages}
+    return {"messages": normalized_messages, "flight_search_results": {}, "quick_actions": []}
 
 
 def flight_search_worker_node(state: ZicoGraphState | Dict[str, Any]) -> Dict[str, Any]:
@@ -256,6 +256,18 @@ def flight_search_worker_node(state: ZicoGraphState | Dict[str, Any]) -> Dict[st
         return {
             "messages": [AIMessage(content=response_text)],
             "itinerary": itinerary,
+            "flight_search_results": {
+                "status": "NO_RESULTS",
+                "origin": {"name": origin_name, "iata": origin},
+                "destination": {"name": dest_name, "iata": destination},
+                "date": flight_date,
+                "flights": []
+            },
+            "quick_actions": [
+                {"id": "return", "label": "Show return flights", "query": "Show return flights"},
+                {"id": "compare", "label": "Compare airlines", "query": "Compare airlines"},
+                {"id": "baggage", "label": "Check baggage policy", "query": "Check baggage policy"},
+            ]
         }
 
     # Merge top flight option into itinerary preview if itinerary is empty
@@ -263,13 +275,35 @@ def flight_search_worker_node(state: ZicoGraphState | Dict[str, Any]) -> Dict[st
     if not updated_itinerary and flight_results:
         updated_itinerary.append(flight_results[0])
 
+    # Format flights for structural response
+    formatted_flights = []
+    for f in flight_results:
+        meta = getattr(f, "metadata", {}) or {}
+        airline = meta.get("airline", "Airline")
+        flight_num = meta.get("flight_number", "")
+        dep_iata = meta.get("departure_iata", origin)
+        arr_iata = meta.get("arrival_iata", destination)
+        formatted_flights.append({
+            "id": f.id,
+            "airline": airline,
+            "flightNumber": flight_num,
+            "departureAirport": dep_iata,
+            "arrivalAirport": arr_iata,
+            "departure": f.start_time.strftime("%H:%M"),
+            "arrival": f.end_time.strftime("%H:%M"),
+            "duration": f"{f.duration_minutes // 60}h {f.duration_minutes % 60}m",
+            "stops": "Non-stop",
+            "price": f"{f.cost:,.0f}",
+            "currency": f.currency
+        })
+
     # Format AI message response
     options_summary = []
     for i, f in enumerate(flight_results[:3], 1):
         dep_time = f.start_time.strftime("%Y-%m-%d %H:%M")
         arr_time = f.end_time.strftime("%Y-%m-%d %H:%M")
         options_summary.append(
-            f"{i}. **{f.title}** | Dep: {dep_time} -> Arr: {arr_time} | Price: **${f.cost:.2f} {f.currency}**"
+            f"{i}. **{f.title}** | Dep: {dep_time} -> Arr: {arr_time} | Price: **{f.cost:,.0f} {f.currency}**"
         )
 
     response_text = (
@@ -281,6 +315,18 @@ def flight_search_worker_node(state: ZicoGraphState | Dict[str, Any]) -> Dict[st
     return {
         "messages": [AIMessage(content=response_text)],
         "itinerary": updated_itinerary,
+        "flight_search_results": {
+            "status": "RESULTS",
+            "origin": {"name": origin_name, "iata": origin},
+            "destination": {"name": dest_name, "iata": destination},
+            "date": flight_date,
+            "flights": formatted_flights
+        },
+        "quick_actions": [
+            {"id": "return", "label": "Show return flights", "query": "Show return flights"},
+            {"id": "compare", "label": "Compare airlines", "query": "Compare airlines"},
+            {"id": "baggage", "label": "Check baggage policy", "query": "Check baggage policy"},
+        ]
     }
 
 
@@ -381,7 +427,18 @@ def research_worker_node(state: ZicoGraphState | Dict[str, Any]) -> Dict[str, An
             "Would you like me to refine this search with specific dates or add an option to your itinerary?"
         )
 
-    return {"messages": [AIMessage(content=response_text)], "itinerary": itinerary}
+    hotel_actions = [
+        {"id": "hotels", "label": "Find available hotels", "query": "Find available hotels"},
+        {"id": "compare_hotels", "label": "Compare options", "query": "Compare hotel options"},
+        {"id": "budget", "label": "Refine budget", "query": "Find cheaper options"},
+        {"id": "city_center", "label": "Near city center", "query": "Hotels near city center"},
+    ]
+
+    return {
+        "messages": [AIMessage(content=response_text)],
+        "itinerary": itinerary,
+        "quick_actions": hotel_actions
+    }
 
 
 def policy_rag_worker_node(state: ZicoGraphState | Dict[str, Any]) -> Dict[str, Any]:

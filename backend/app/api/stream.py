@@ -279,7 +279,11 @@ async def websocket_stream_endpoint(websocket: WebSocket, trip_id: str):
                                 current_state = graph_engine.get_state(thread_config)
                                 state_values = current_state.values if current_state else {}
                                 itinerary = state_values.get("itinerary", [])
+                                flight_search_results = state_values.get("flight_search_results", {})
+                                quick_actions = state_values.get("quick_actions", [])
                                 serialized_itinerary = _safe_serialize(itinerary)
+                                serialized_flight_search_results = _safe_serialize(flight_search_results)
+                                serialized_quick_actions = _safe_serialize(quick_actions)
 
                                 # Push state_update on itinerary change or completion
                                 if len(itinerary) != last_streamed_itinerary_count or itinerary:
@@ -316,6 +320,8 @@ async def websocket_stream_endpoint(websocket: WebSocket, trip_id: str):
                                         "output": _safe_serialize(node_output),
                                         "content": msg_snippet,
                                         "message": msg_snippet,
+                                        "flight_search_results": serialized_flight_search_results,
+                                        "quick_actions": serialized_quick_actions,
                                     },
                                 )
                             except Exception as state_exc:

@@ -28,14 +28,7 @@ function getFriendlyWorkerName(node: string): string {
   return 'Processing travel request...';
 }
 
-function hasFlightContent(text: string): boolean {
-  const lower = text.toLowerCase();
-  return (
-    lower.includes('available flights') ||
-    lower.includes('flight options') ||
-    (lower.includes('flight') && (lower.includes('dubai') || lower.includes('pune') || lower.includes('kochi')))
-  );
-}
+
 
 interface TimelineProps {
   tripId: string;
@@ -66,6 +59,45 @@ export function Timeline({
       role: 'assistant',
       text: 'Here are the available flights from Kochi (COK) to Dubai (DXB) for Friday, 23 May 2025. These results are from live data via AviationStack.',
       time: '10:24 AM',
+      flight_search_results: {
+        status: 'RESULTS',
+        origin: { name: 'Kochi', iata: 'COK' },
+        destination: { name: 'Dubai', iata: 'DXB' },
+        flights: [
+          {
+            id: 'f1',
+            airline: 'Emirates',
+            flightNumber: 'EK-523',
+            departure: '10:35',
+            departureAirport: 'COK',
+            arrival: '12:55',
+            arrivalAirport: 'DXB',
+            duration: '4h 20m',
+            stops: 'Non-stop',
+            price: '18,450',
+            currency: 'INR',
+            aircraft: 'Boeing 777-300ER',
+            baggage: '30 kg check-in, 7 kg cabin',
+            cabin: 'Economy',
+          },
+          {
+            id: 'f2',
+            airline: 'IndiGo',
+            flightNumber: '6E-1451',
+            departure: '12:10',
+            departureAirport: 'COK',
+            arrival: '16:35',
+            arrivalAirport: 'DXB',
+            duration: '4h 25m',
+            stops: 'Non-stop',
+            price: '16,900',
+            currency: 'INR',
+            aircraft: 'Airbus A321neo',
+            baggage: '30 kg check-in, 7 kg cabin',
+            cabin: 'Economy',
+          }
+        ]
+      }
     },
   ]);
 
@@ -78,6 +110,8 @@ export function Timeline({
   // Streaming token state
   const [streamingTokenMessage, setStreamingTokenMessage] = useState<string>('');
   const streamingTokenRef = useRef<string>('');
+  const flightResultsRef = useRef<any>(null);
+  const quickActionsRef = useRef<any[] | null>(null);
   const [activeToolCall, setActiveToolCall] = useState<{ tool: string; input?: any } | null>(null);
   const [streamError, setStreamError] = useState<string | null>(null);
 
@@ -150,6 +184,18 @@ export function Timeline({
           if (streamEvent.output?.itinerary && Array.isArray(streamEvent.output.itinerary)) {
             setItinerary(streamEvent.output.itinerary);
           }
+          if (streamEvent.flight_search_results) {
+            flightResultsRef.current = streamEvent.flight_search_results;
+          }
+          if (streamEvent.quick_actions) {
+            quickActionsRef.current = streamEvent.quick_actions;
+          }
+          if (streamEvent.flight_search_results) {
+            flightResultsRef.current = streamEvent.flight_search_results;
+          }
+          if (streamEvent.quick_actions) {
+            quickActionsRef.current = streamEvent.quick_actions;
+          }
 
           const msgText =
             streamEvent.message ||
@@ -173,8 +219,12 @@ export function Timeline({
                 text: typeof msgText === 'string' ? msgText : JSON.stringify(msgText),
                 time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
                 sources: streamEvent.sources,
+                flight_search_results: flightResultsRef.current || streamEvent.flight_search_results,
+                quick_actions: quickActionsRef.current || streamEvent.quick_actions,
               },
             ]);
+            flightResultsRef.current = null;
+            quickActionsRef.current = null;
           }
         }
 
@@ -205,10 +255,14 @@ export function Timeline({
                 role: 'assistant',
                 text: finalTokenContent,
                 time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                flight_search_results: flightResultsRef.current,
+                quick_actions: quickActionsRef.current || undefined,
               },
             ]);
             streamingTokenRef.current = '';
             setStreamingTokenMessage('');
+            flightResultsRef.current = null;
+            quickActionsRef.current = null;
           }
           setIsProcessing(false);
           setActiveWorkerNode(null);
@@ -448,7 +502,7 @@ export function Timeline({
         {messages.map((msg, idx) => {
           const isUser = msg.role === 'user';
           const isSystem = msg.role === 'system';
-          const showFlightCard = !isUser && !isSystem && hasFlightContent(msg.text);
+          const showFlightCard = !isUser && !isSystem && msg.flight_search_results?.flights && msg.flight_search_results.flights.length > 0;
 
           if (isSystem) {
             return (
@@ -488,7 +542,7 @@ export function Timeline({
                   <MarkdownRenderer content={msg.text} />
 
                   {/* Flight Results Card if response is a flight inquiry */}
-                  {showFlightCard && <FlightResultsCard />}
+                  {showFlightCard && <FlightResultsCard flights={msg.flight_search_results.flights} />}
 
                   {/* Message Timestamp */}
                   <div
@@ -507,6 +561,7 @@ export function Timeline({
                   <QuickFollowUpActions
                     onSelectAction={(query) => handleSendMessage(query)}
                     disabled={isProcessing}
+                    actions={msg.quick_actions}
                   />
                 </div>
               )}
