@@ -34,8 +34,13 @@ from app.core.state import TravelState
 
 logger = get_logger(__name__)
 
-# The four authoritative operational intents supported by ZICO
-ALLOWED_INTENTS: Set[str] = {"flight", "research", "general_travel", "unsupported"}
+# The authoritative operational intents supported by ZICO
+ALLOWED_INTENTS: Set[str] = {
+    "flight", "research", "general_travel", "unsupported",
+    "FLIGHT_SEARCH", "FLIGHT_STATUS", "HOTEL_SEARCH",
+    "DESTINATION_RESEARCH", "ITINERARY_PLANNING",
+    "TRAVEL_POLICY", "LOCATION_QUERY", "GENERAL_TRAVEL", "UNSUPPORTED"
+}
 
 # Date formats accepted for basic structural validation
 DATE_FORMATS = ("%Y-%m-%d", "%Y/%m/%d", "%d-%m-%Y")
