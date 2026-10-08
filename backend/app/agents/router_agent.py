@@ -444,6 +444,22 @@ class RouterAgent:
             return self._model
         return get_chat_model()
 
+    def _decision_to_response(self, decision: RouterDecision) -> Dict[str, Any]:
+        res: Dict[str, Any] = {
+            "intent": decision.intent,
+            "intent_confidence": decision.confidence,
+            "active_agent": "router_agent",
+        }
+        if decision.location:
+            res["location"] = decision.location
+        if decision.budget:
+            res["budget"] = decision.budget
+        if decision.origin:
+            res["origin"] = decision.origin
+        if decision.destination:
+            res["destination"] = decision.destination
+        return res
+
     def route(self, state: TravelState) -> Dict[str, Any]:
         """
         Execute intent routing on the provided TravelState.
@@ -480,19 +496,12 @@ class RouterAgent:
         except Exception as exc:
             logger.error("Failed to obtain chat model for routing: %s", exc)
             current_errors = list(state.get("errors", [])) if isinstance(state, dict) else []
-
-            decision = classify_intent_heuristically(cleaned_query)
-            res: Dict[str, Any] = {
-                "intent": decision.intent,
-                "intent_confidence": decision.confidence,
+            return {
+                "intent": "unsupported",
+                "intent_confidence": None,
                 "active_agent": "router_agent",
                 "errors": current_errors + [f"Router LLM configuration error: {exc}"],
             }
-            if decision.location: res["location"] = decision.location
-            if decision.budget: res["budget"] = decision.budget
-            if decision.origin: res["origin"] = decision.origin
-            if decision.destination: res["destination"] = decision.destination
-            return res
 
         # 3. Bind structured output schema
         if hasattr(model, "with_structured_output"):
@@ -510,20 +519,18 @@ class RouterAgent:
             response = runnable.invoke(messages)
         except Exception as exc:
             logger.error("Router model invocation failed: %s", exc)
+            err_str = str(exc).lower()
+            if self._model is None and ("insufficient_quota" in err_str or "credit_balance_exhausted" in err_str):
+                logger.warning("OpenAI quota exhausted; falling back to deterministic heuristic classification.")
+                heuristic = classify_intent_heuristically(cleaned_query)
+                return self._decision_to_response(heuristic)
             current_errors = list(state.get("errors", [])) if isinstance(state, dict) else []
-
-            decision = classify_intent_heuristically(cleaned_query)
-            res: Dict[str, Any] = {
-                "intent": decision.intent,
-                "intent_confidence": decision.confidence,
+            return {
+                "intent": "unsupported",
+                "intent_confidence": None,
                 "active_agent": "router_agent",
                 "errors": current_errors + [f"Router model failure: {exc}"],
             }
-            if decision.location: res["location"] = decision.location
-            if decision.budget: res["budget"] = decision.budget
-            if decision.origin: res["origin"] = decision.origin
-            if decision.destination: res["destination"] = decision.destination
-            return res
 
         # 5. Parse and validate structured output
         decision: Optional[RouterDecision] = None
@@ -582,20 +589,7 @@ class RouterAgent:
             "Router selected intent: %s (confidence=%s)", decision.intent, decision.confidence
         )
 
-        res: Dict[str, Any] = {
-            "intent": decision.intent,
-            "intent_confidence": decision.confidence,
-            "active_agent": "router_agent",
-        }
-        if decision.location:
-            res["location"] = decision.location
-        if decision.budget:
-            res["budget"] = decision.budget
-        if decision.origin:
-            res["origin"] = decision.origin
-        if decision.destination:
-            res["destination"] = decision.destination
-        return res
+        return self._decision_to_response(decision)
 
     async def aroute(self, state: TravelState) -> Dict[str, Any]:
         """
@@ -632,19 +626,12 @@ class RouterAgent:
         except Exception as exc:
             logger.error("Failed to obtain chat model for routing: %s", exc)
             current_errors = list(state.get("errors", [])) if isinstance(state, dict) else []
-
-            decision = classify_intent_heuristically(cleaned_query)
-            res: Dict[str, Any] = {
-                "intent": decision.intent,
-                "intent_confidence": decision.confidence,
+            return {
+                "intent": "unsupported",
+                "intent_confidence": None,
                 "active_agent": "router_agent",
                 "errors": current_errors + [f"Router LLM configuration error: {exc}"],
             }
-            if decision.location: res["location"] = decision.location
-            if decision.budget: res["budget"] = decision.budget
-            if decision.origin: res["origin"] = decision.origin
-            if decision.destination: res["destination"] = decision.destination
-            return res
 
         # 3. Bind structured output schema
         if hasattr(model, "with_structured_output"):
@@ -665,20 +652,18 @@ class RouterAgent:
                 response = runnable.invoke(messages)
         except Exception as exc:
             logger.error("Router async model invocation failed: %s", exc)
+            err_str = str(exc).lower()
+            if self._model is None and ("insufficient_quota" in err_str or "credit_balance_exhausted" in err_str):
+                logger.warning("OpenAI quota exhausted; falling back to deterministic heuristic classification.")
+                heuristic = classify_intent_heuristically(cleaned_query)
+                return self._decision_to_response(heuristic)
             current_errors = list(state.get("errors", [])) if isinstance(state, dict) else []
-
-            decision = classify_intent_heuristically(cleaned_query)
-            res: Dict[str, Any] = {
-                "intent": decision.intent,
-                "intent_confidence": decision.confidence,
+            return {
+                "intent": "unsupported",
+                "intent_confidence": None,
                 "active_agent": "router_agent",
                 "errors": current_errors + [f"Router model failure: {exc}"],
             }
-            if decision.location: res["location"] = decision.location
-            if decision.budget: res["budget"] = decision.budget
-            if decision.origin: res["origin"] = decision.origin
-            if decision.destination: res["destination"] = decision.destination
-            return res
 
         # 5. Parse and validate structured output
         decision: Optional[RouterDecision] = None
@@ -723,20 +708,7 @@ class RouterAgent:
             "Router selected intent: %s (confidence=%s)", decision.intent, decision.confidence
         )
 
-        res: Dict[str, Any] = {
-            "intent": decision.intent,
-            "intent_confidence": decision.confidence,
-            "active_agent": "router_agent",
-        }
-        if decision.location:
-            res["location"] = decision.location
-        if decision.budget:
-            res["budget"] = decision.budget
-        if decision.origin:
-            res["origin"] = decision.origin
-        if decision.destination:
-            res["destination"] = decision.destination
-        return res
+        return self._decision_to_response(decision)
 
 
 # ---------------------------------------------------------------------------

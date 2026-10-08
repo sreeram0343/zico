@@ -48,58 +48,8 @@ export function Timeline({
   const [socket, setSocket] = useState<WebSocket | null>(null);
   const [isConnected, setIsConnected] = useState<boolean>(false);
 
-  // Initial messages mirror the reference design demo state
-  const [messages, setMessages] = useState<ChatMessage[]>([
-    {
-      role: 'user',
-      text: 'Find me a flight from Kochi to Dubai next Friday',
-      time: '10:24 AM',
-    },
-    {
-      role: 'assistant',
-      text: 'Here are the available flights from Kochi (COK) to Dubai (DXB) for Friday, 23 May 2025. These results are from live data via AviationStack.',
-      time: '10:24 AM',
-      flight_search_results: {
-        status: 'RESULTS',
-        origin: { name: 'Kochi', iata: 'COK' },
-        destination: { name: 'Dubai', iata: 'DXB' },
-        flights: [
-          {
-            id: 'f1',
-            airline: 'Emirates',
-            flightNumber: 'EK-523',
-            departure: '10:35',
-            departureAirport: 'COK',
-            arrival: '12:55',
-            arrivalAirport: 'DXB',
-            duration: '4h 20m',
-            stops: 'Non-stop',
-            price: '18,450',
-            currency: 'INR',
-            aircraft: 'Boeing 777-300ER',
-            baggage: '30 kg check-in, 7 kg cabin',
-            cabin: 'Economy',
-          },
-          {
-            id: 'f2',
-            airline: 'IndiGo',
-            flightNumber: '6E-1451',
-            departure: '12:10',
-            departureAirport: 'COK',
-            arrival: '16:35',
-            arrivalAirport: 'DXB',
-            duration: '4h 25m',
-            stops: 'Non-stop',
-            price: '16,900',
-            currency: 'INR',
-            aircraft: 'Airbus A321neo',
-            baggage: '30 kg check-in, 7 kg cabin',
-            cabin: 'Economy',
-          }
-        ]
-      }
-    },
-  ]);
+  // Initial messages start clean - no hardcoded demo messages
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
 
   const [activeInterrupt, setActiveInterrupt] = useState<InterruptEvent | null>(null);
   const [itinerary, setItinerary] = useState<TripSegment[]>([]);
@@ -112,6 +62,7 @@ export function Timeline({
   const streamingTokenRef = useRef<string>('');
   const flightResultsRef = useRef<any>(null);
   const quickActionsRef = useRef<any[] | null>(null);
+  const isVoiceTurnRef = useRef<boolean>(false);
   const [activeToolCall, setActiveToolCall] = useState<{ tool: string; input?: any } | null>(null);
   const [streamError, setStreamError] = useState<string | null>(null);
 
@@ -264,6 +215,10 @@ export function Timeline({
             flightResultsRef.current = null;
             quickActionsRef.current = null;
           }
+          if (isVoiceTurnRef.current) {
+            console.log('chat_from_voice_completed');
+            isVoiceTurnRef.current = false;
+          }
           setIsProcessing(false);
           setActiveWorkerNode(null);
           setActiveToolCall(null);
@@ -273,6 +228,7 @@ export function Timeline({
         else if (streamEvent.type === 'error') {
           const errText = streamEvent.message || streamEvent.content || 'An error occurred';
           setStreamError(errText);
+          isVoiceTurnRef.current = false;
           setIsProcessing(false);
           setActiveToolCall(null);
         }
@@ -328,27 +284,63 @@ export function Timeline({
         mediaRecorderRef.current.stop();
       }
       setIsRecording(false);
+      console.log('voice_recording_stopped');
     } else {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        const mediaRecorder = new MediaRecorder(stream);
+
+        let mimeType = '';
+        let fileExt = 'webm';
+        if (typeof MediaRecorder !== 'undefined') {
+          if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
+            mimeType = 'audio/webm;codecs=opus';
+            fileExt = 'webm';
+          } else if (MediaRecorder.isTypeSupported('audio/webm')) {
+            mimeType = 'audio/webm';
+            fileExt = 'webm';
+          } else if (MediaRecorder.isTypeSupported('audio/mp4')) {
+            mimeType = 'audio/mp4';
+            fileExt = 'm4a';
+          } else if (MediaRecorder.isTypeSupported('audio/ogg;codecs=opus')) {
+            mimeType = 'audio/ogg;codecs=opus';
+            fileExt = 'ogg';
+          } else if (MediaRecorder.isTypeSupported('audio/wav')) {
+            mimeType = 'audio/wav';
+            fileExt = 'wav';
+          }
+        }
+
+        const mediaRecorder = mimeType
+          ? new MediaRecorder(stream, { mimeType })
+          : new MediaRecorder(stream);
+
         mediaRecorderRef.current = mediaRecorder;
         audioChunksRef.current = [];
 
         mediaRecorder.ondataavailable = (event) => {
-          if (event.data.size > 0) {
+          if (event.data && event.data.size > 0) {
             audioChunksRef.current.push(event.data);
           }
         };
 
         mediaRecorder.onstop = async () => {
           stream.getTracks().forEach((track) => track.stop());
-          const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/wav' });
+          const actualMime = mediaRecorder.mimeType || mimeType || 'audio/webm';
+          const audioBlob = new Blob(audioChunksRef.current, { type: actualMime });
+
+          if (!audioBlob || audioBlob.size === 0) {
+            console.warn('voice_recording_empty: 0 bytes captured');
+            setStreamError('No audio recorded. Please speak and try again.');
+            setIsProcessing(false);
+            setIsRecording(false);
+            return;
+          }
 
           setIsProcessing(true);
+          console.log('voice_upload_started');
           try {
             const formData = new FormData();
-            formData.append('file', audioBlob, 'voice_query.wav');
+            formData.append('file', audioBlob, `voice_query.${fileExt}`);
 
             const resp = await fetch(`${apiBaseUrl.replace(/\/$/, '')}/api/v1/voice/transcribe`, {
               method: 'POST',
@@ -357,32 +349,45 @@ export function Timeline({
 
             if (resp.ok) {
               const data = await resp.json();
-              if (data.transcript) {
-                setPromptInput(data.transcript);
+              console.log('voice_upload_completed');
+              if (data.transcript && data.transcript.trim()) {
+                console.log('chat_from_voice_started');
+                await handleSendMessage(data.transcript.trim(), true);
+              } else {
+                setStreamError('No speech was detected. Please try speaking again.');
               }
             } else {
-              setStreamError('Audio transcription failed on server.');
+              const errData = await resp.json().catch(() => null);
+              const errMsg = errData?.detail || `Audio transcription failed on server (Status ${resp.status}).`;
+              setStreamError(errMsg);
             }
           } catch (err) {
             setStreamError(`Voice service error: ${String(err)}`);
           } finally {
             setIsProcessing(false);
+            setIsRecording(false);
           }
         };
 
         mediaRecorder.start();
         setIsRecording(true);
+        console.log('voice_recording_started');
       } catch (err) {
         setStreamError('Microphone access denied or unavailable.');
         console.error('Mic error:', err);
+        setIsRecording(false);
       }
     }
   };
 
   // Send message
-  const handleSendMessage = async (textToSend?: string) => {
+  const handleSendMessage = async (textToSend?: string, isFromVoice?: boolean) => {
     const text = (textToSend || promptInput).trim();
     if (!text || isProcessing) return;
+
+    if (isFromVoice) {
+      isVoiceTurnRef.current = true;
+    }
 
     setStreamError(null);
     streamingTokenRef.current = '';
@@ -409,6 +414,7 @@ export function Timeline({
           trip_id: tripId,
           user_id: userId,
           enable_tts: true,
+          is_voice: Boolean(isFromVoice),
         })
       );
     } else {
@@ -421,6 +427,7 @@ export function Timeline({
             session_id: tripId,
             trip_id: tripId,
             user_id: userId,
+            is_voice: Boolean(isFromVoice),
           }),
         });
 
@@ -441,10 +448,16 @@ export function Timeline({
               sources: data.sources || [],
             },
           ]);
+          if (isVoiceTurnRef.current) {
+            console.log('chat_from_voice_completed');
+            isVoiceTurnRef.current = false;
+          }
         } else {
+          isVoiceTurnRef.current = false;
           setStreamError(`Server request failed (Status: ${resp.status})`);
         }
       } catch (err) {
+        isVoiceTurnRef.current = false;
         setStreamError(`Network connection error: ${String(err)}`);
       } finally {
         setIsProcessing(false);
@@ -457,6 +470,7 @@ export function Timeline({
     if (externalPrompt && externalPrompt.text) {
       handleSendMessage(externalPrompt.text);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [externalPrompt]);
 
   // Respond to Human-in-the-Loop Interrupt
@@ -499,6 +513,17 @@ export function Timeline({
     <div className="flex flex-col h-full">
       {/* Messages Container */}
       <div className="flex-1 space-y-6 overflow-y-auto pr-1 pb-4">
+        {messages.length === 0 && !streamingTokenMessage && !isProcessing && (
+          <div className="flex flex-col items-center justify-center py-12 text-center text-[#667085]">
+            <div className="w-12 h-12 rounded-full bg-[#FFF6D8] border border-[#FDE266] flex items-center justify-center mb-3">
+              <Plane className="w-6 h-6 text-[#D99E10] transform -rotate-45" />
+            </div>
+            <h3 className="text-base font-semibold text-[#101828]">Where are you headed?</h3>
+            <p className="text-xs max-w-sm mt-1 text-[#475467]">
+              Ask ZICO for live flights, hotels, or destination recommendations.
+            </p>
+          </div>
+        )}
         {messages.map((msg, idx) => {
           const isUser = msg.role === 'user';
           const isSystem = msg.role === 'system';

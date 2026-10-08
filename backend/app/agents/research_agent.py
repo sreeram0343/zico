@@ -174,8 +174,8 @@ class ResearchAgent:
             else:
                 res = resolve_location(cleaned)
 
-            if res.status == "resolved" and res.city_name:
-                return res.city_name
+            if res.status == "resolved" and (res.city or res.normalized_name):
+                return res.city or res.normalized_name
         except Exception as exc:
             logger.warning("Location resolution failed for %r: %s; using raw query", cleaned, exc)
 

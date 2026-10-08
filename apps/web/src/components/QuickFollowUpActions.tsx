@@ -17,30 +17,7 @@ export interface QuickAction {
   icon?: string;
 }
 
-const DEFAULT_FOLLOW_UPS: QuickAction[] = [
-  {
-    id: 'return',
-    label: 'Show return flights',
-    query: 'Show return flights from Dubai to Kochi next week',
-  },
-  {
-    id: 'compare',
-    label: 'Compare airlines',
-    query: 'Compare Emirates and IndiGo flights on this route',
-  },
-  {
-    id: 'baggage',
-    label: 'Check baggage policy',
-    query: 'Check the baggage policy for these flights',
-  },
-  {
-    id: 'hotels',
-    label: 'Find hotels in Dubai',
-    query: 'Hotels in Dubai under 15k',
-  },
-];
-
-interface QuickFollowUpActionsProps {
+export interface QuickFollowUpActionsProps {
   onSelectAction: (query: string) => void;
   disabled?: boolean;
   actions?: QuickAction[];
@@ -51,14 +28,16 @@ export function QuickFollowUpActions({
   disabled,
   actions,
 }: QuickFollowUpActionsProps) {
-  const displayActions = actions && actions.length > 0 ? actions : DEFAULT_FOLLOW_UPS;
+  if (!actions || actions.length === 0) {
+    return null;
+  }
   return (
     <div
       className="mt-3 flex items-center gap-2 overflow-x-auto pb-1 no-scrollbar"
       role="toolbar"
       aria-label="Quick follow-up options"
     >
-      {displayActions.map((item) => {
+      {actions.map((item) => {
         let Icon = RotateCcw;
         if (item.id === 'compare') Icon = Scale;
         else if (item.id === 'baggage') Icon = Luggage;

@@ -142,7 +142,7 @@ class ValidatorAgent:
 
         # 3. Route Contradiction Validation (for flight intent)
         intent = state.get("intent") if isinstance(state, dict) else getattr(state, "intent", None)
-        if intent == "flight":
+        if intent in ("flight", "FLIGHT_SEARCH", "FLIGHT_STATUS", "flight_search", "flight_status"):
             origin = (
                 state.get("origin") if isinstance(state, dict) else getattr(state, "origin", None)
             )
@@ -183,6 +183,19 @@ class ValidatorAgent:
                 errors.append("Flight results must be a list of records.")
                 return
 
+            flight_query = state.get("flight_query") or {}
+            expected_dep = (flight_query.get("dep_iata") or state.get("origin") or "").strip().upper()
+            expected_arr = (flight_query.get("arr_iata") or state.get("destination") or "").strip().upper()
+            if not expected_dep or not expected_arr:
+                import re
+                uq = state.get("user_query", "")
+                m = re.search(r"\b([A-Za-z]{3})\s+to\s+([A-Za-z]{3})\b", uq, re.IGNORECASE)
+                if m:
+                    if not expected_dep:
+                        expected_dep = m.group(1).upper()
+                    if not expected_arr:
+                        expected_arr = m.group(2).upper()
+
             for idx, item in enumerate(results):
                 if not isinstance(item, dict):
                     errors.append(
@@ -193,12 +206,38 @@ class ValidatorAgent:
                 # Ensure minimum structural identity exists
                 has_id = bool(item.get("flight_iata") or item.get("flight_number"))
                 has_route = bool(
-                    item.get("departure") or item.get("arrival") or item.get("airline_name")
+                    item.get("departure") or item.get("arrival") or item.get("airline_name") or item.get("arrival_airport")
                 )
                 if not has_id and not has_route:
                     errors.append(
                         f"Malformed flight result at index {idx}: missing flight identifier or route details."
                     )
+
+                # Validate route consistency if departure/arrival IATA codes are specified
+                if expected_dep:
+                    dep_data = item.get("departure") or {}
+                    res_dep = (
+                        (dep_data.get("iata") if isinstance(dep_data, dict) else "")
+                        or item.get("departure_iata")
+                        or item.get("departure_airport")
+                        or ""
+                    ).strip().upper()
+                    if res_dep and len(expected_dep) == 3 and res_dep != expected_dep:
+                        errors.append(
+                            f"Mismatched flight departure at index {idx}: expected {expected_dep}, but result has {res_dep}."
+                        )
+                if expected_arr:
+                    arr_data = item.get("arrival") or {}
+                    res_arr = (
+                        (arr_data.get("iata") if isinstance(arr_data, dict) else "")
+                        or item.get("arrival_iata")
+                        or item.get("arrival_airport")
+                        or ""
+                    ).strip().upper()
+                    if res_arr and len(expected_arr) == 3 and res_arr != expected_arr:
+                        errors.append(
+                            f"Mismatched flight arrival at index {idx}: expected {expected_arr}, but result has {res_arr}."
+                        )
 
     def _validate_research_operations(self, state: TravelState, errors: List[str]) -> None:
         """Validate research state consistency, result structure, and source provenance."""
@@ -268,9 +307,21 @@ class ValidatorAgent:
 
         # 4. Operation-Specific State Consistency
         intent = state.get("intent") if isinstance(state, dict) else getattr(state, "intent", None)
-        if intent == "flight":
+        if intent in ("flight", "FLIGHT_SEARCH", "FLIGHT_STATUS", "flight_search", "flight_status"):
             self._validate_flight_operations(state, errors)
-        elif intent == "research":
+        elif intent in (
+            "research",
+            "HOTEL_SEARCH",
+            "DESTINATION_RESEARCH",
+            "ITINERARY_PLANNING",
+            "TRAVEL_POLICY",
+            "LOCATION_QUERY",
+            "hotel_search",
+            "destination_research",
+            "itinerary_planning",
+            "travel_policy",
+            "location_query",
+        ):
             self._validate_research_operations(state, errors)
         # Note: 'general_travel' and 'unsupported' require no specialized tool outputs
 

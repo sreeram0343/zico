@@ -268,6 +268,8 @@ async def chat_endpoint(
         request_id,
         session_id,
     )
+    if getattr(request, "is_voice", False):
+        logger.info("chat_from_voice_started")
 
     # 2. Build initial TravelState using the established state factory
     initial_state: TravelState = create_initial_state(
@@ -383,4 +385,6 @@ async def chat_endpoint(
         request_id,
         final_session_id,
     )
+    if getattr(request, "is_voice", False):
+        logger.info("chat_from_voice_completed")
     return travel_response

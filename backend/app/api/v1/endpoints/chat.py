@@ -1,3 +1,4 @@
+import logging
 import uuid
 from typing import Any, Dict, List, Optional
 
@@ -12,6 +13,8 @@ from app.graph.state import (
     TripSegment,
 )
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter()
 
 
@@ -19,6 +22,7 @@ class ChatRequest(BaseModel):
     message: str = Field(description="Traveler query, command, or update")
     trip_id: Optional[str] = Field(default=None, description="Active Trip ID for state persistence")
     user_id: Optional[str] = Field(default="user_default", description="Traveler User ID")
+    is_voice: Optional[bool] = Field(default=False, description="Flag indicating voice origin")
     constraints: Optional[TripConstraints] = None
     itinerary: Optional[List[TripSegment]] = None
 
@@ -57,10 +61,15 @@ async def chat_interaction(request: ChatRequest) -> ChatResponse:
     current_actions = existing_values.get("pending_actions", [])
     current_disruptions = existing_values.get("active_disruptions", [])
 
+    if request.is_voice:
+        logger.info("chat_from_voice_started transport=http")
+
     input_payload = {
         "messages": [HumanMessage(content=request.message)],
         "trip_id": trip_id,
         "user_id": user_id,
+        "flight_search_results": {},
+        "quick_actions": [],
         "itinerary": current_itinerary,
         "constraints": current_constraints,
         "pending_actions": current_actions,
@@ -82,6 +91,9 @@ async def chat_interaction(request: ChatRequest) -> ChatResponse:
         if isinstance(msg, AIMessage) or getattr(msg, "type", "") == "ai":
             reply_text = msg.content if isinstance(msg.content, str) else str(msg.content)
             break
+
+    if request.is_voice:
+        logger.info("chat_from_voice_completed transport=http")
 
     return ChatResponse(
         trip_id=result.get("trip_id", trip_id),

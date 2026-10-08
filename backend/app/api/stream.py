@@ -117,15 +117,19 @@ async def websocket_stream_endpoint(websocket: WebSocket, trip_id: str):
                     or ""
                 )
 
+                is_voice_turn = False
                 # ---------------------------------------------------------
                 # Case 1: Audio Input -> Transcribe first then run Graph
                 # ---------------------------------------------------------
                 if msg_type == "voice_input":
+                    is_voice_turn = True
                     audio_b64 = payload.get("audio_base64", "")
                     if audio_b64:
                         try:
+                            logger.info("transcription_started transport=ws")
                             audio_bytes = base64.b64decode(audio_b64)
-                            transcript = await voice_service.transcribe_audio(audio_bytes)
+                            transcript = await voice_service.transcribe_audio(audio_bytes, filename="voice_input.webm")
+                            logger.info("transcription_completed transport=ws")
                             await _safe_send_json(
                                 websocket,
                                 {
@@ -135,13 +139,14 @@ async def websocket_stream_endpoint(websocket: WebSocket, trip_id: str):
                                 },
                             )
                             input_query = transcript
+                            logger.info("chat_from_voice_started transport=ws")
                         except Exception as exc:
+                            logger.error("transcription_failed transport=ws error=%s", exc)
                             print(
                                 f"[WS ERROR] Voice transcription error: {exc}",
                                 file=sys.stderr,
                                 flush=True,
                             )
-                            logger.error(f"Voice transcription failed: {exc}")
                             await _safe_send_json(
                                 websocket,
                                 {
@@ -158,6 +163,8 @@ async def websocket_stream_endpoint(websocket: WebSocket, trip_id: str):
                         "messages": [HumanMessage(content=input_query)],
                         "trip_id": active_trip_id,
                         "user_id": user_id,
+                        "flight_search_results": {},
+                        "quick_actions": [],
                     }
 
                 # ---------------------------------------------------------
@@ -180,11 +187,16 @@ async def websocket_stream_endpoint(websocket: WebSocket, trip_id: str):
                 # Case 3: Standard User Prompt
                 # ---------------------------------------------------------
                 else:
+                    if payload.get("is_voice"):
+                        is_voice_turn = True
+                        logger.info("chat_from_voice_started transport=ws")
                     input_query = user_content
                     target_input = {
                         "messages": [HumanMessage(content=input_query)],
                         "trip_id": active_trip_id,
                         "user_id": user_id,
+                        "flight_search_results": {},
+                        "quick_actions": [],
                     }
 
                 print(f"[WS GRAPH] Starting stream for query: {input_query!r}", flush=True)
@@ -311,6 +323,24 @@ async def websocket_stream_endpoint(websocket: WebSocket, trip_id: str):
                                                 else str(m.content)
                                             )
 
+                                # Extract flight_search_results and quick_actions from the node output if available
+                                output_flights = None
+                                output_actions = None
+                                if isinstance(node_output, dict):
+                                    output_flights = node_output.get("flight_search_results")
+                                    output_actions = node_output.get("quick_actions")
+
+                                current_flight_results = (
+                                    _safe_serialize(output_flights)
+                                    if output_flights is not None
+                                    else (_safe_serialize(flight_search_results) if node_candidate == "flight_search_worker" else None)
+                                )
+                                current_quick_actions = (
+                                    _safe_serialize(output_actions)
+                                    if output_actions is not None
+                                    else _safe_serialize(quick_actions)
+                                )
+
                                 # Also emit node_update for state synchronization without fake message content
                                 await _safe_send_json(
                                     websocket,
@@ -320,8 +350,8 @@ async def websocket_stream_endpoint(websocket: WebSocket, trip_id: str):
                                         "output": _safe_serialize(node_output),
                                         "content": msg_snippet,
                                         "message": msg_snippet,
-                                        "flight_search_results": serialized_flight_search_results,
-                                        "quick_actions": serialized_quick_actions,
+                                        "flight_search_results": current_flight_results,
+                                        "quick_actions": current_quick_actions,
                                     },
                                 )
                             except Exception as state_exc:
@@ -369,6 +399,9 @@ async def websocket_stream_endpoint(websocket: WebSocket, trip_id: str):
                         )
                     except Exception as tts_exc:
                         logger.debug(f"TTS streaming notice: {tts_exc}")
+
+                if is_voice_turn:
+                    logger.info("chat_from_voice_completed transport=ws")
 
                 # Signal turn completion
                 await _safe_send_json(

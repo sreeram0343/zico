@@ -85,47 +85,78 @@ def _extract_airports(text: str) -> tuple[str, str, str, str]:
     origin_code, dest_code = "", ""
     origin_name, dest_name = "", ""
 
+    IATA_TO_CITY = {code: city.title() for city, code in CITY_TO_IATA.items()}
+
     # 1. Check for 'from X to Y' pattern
-    match = re.search(r"from\s+([a-zA-Z\s]+?)\s+to\s+([a-zA-Z\s]+)", text_lower)
+    match = re.search(r"from\s+([a-zA-Z\s]+?)\s+to\s+([a-zA-Z\s]+?)(?:\s+(?:on|next|tomorrow|this|\b\d)|$)", text_lower)
+    if not match:
+        match = re.search(r"from\s+([a-zA-Z\s]+?)\s+to\s+([a-zA-Z\s]+)", text_lower)
+
     if match:
         orig_candidate = match.group(1).strip()
         dest_candidate = match.group(2).strip()
 
-        for city, code in CITY_TO_IATA.items():
-            if city in orig_candidate and not origin_code:
-                origin_code = code
-                origin_name = f"{city.title()} ({code})"
-            if city in dest_candidate and not dest_code:
-                dest_code = code
-                dest_name = f"{city.title()} ({code})"
+        # Check if candidate is 3-letter IATA code
+        if len(orig_candidate) == 3 and orig_candidate.isalpha():
+            origin_code = orig_candidate.upper()
+            city_disp = IATA_TO_CITY.get(origin_code, origin_code)
+            origin_name = f"{city_disp} ({origin_code})"
+        else:
+            for city, code in CITY_TO_IATA.items():
+                if city in orig_candidate and not origin_code:
+                    origin_code = code
+                    origin_name = f"{city.title()} ({code})"
+
+        if len(dest_candidate) == 3 and dest_candidate.isalpha():
+            dest_code = dest_candidate.upper()
+            city_disp = IATA_TO_CITY.get(dest_code, dest_code)
+            dest_name = f"{city_disp} ({dest_code})"
+        else:
+            for city, code in CITY_TO_IATA.items():
+                if city in dest_candidate and not dest_code:
+                    dest_code = code
+                    dest_name = f"{city.title()} ({code})"
 
     # 2. Check for explicit 'to <destination>' pattern
     if not dest_code:
         match_to = re.search(r"\b(?:to|reach|into|heading to)\s+([a-zA-Z\s]+)", text_lower)
         if match_to:
             candidate = match_to.group(1).strip()
-            for city, code in CITY_TO_IATA.items():
-                if city in candidate:
-                    dest_code = code
-                    dest_name = f"{city.title()} ({code})"
-                    break
+            if len(candidate) == 3 and candidate.isalpha():
+                dest_code = candidate.upper()
+                city_disp = IATA_TO_CITY.get(dest_code, dest_code)
+                dest_name = f"{city_disp} ({dest_code})"
+            else:
+                for city, code in CITY_TO_IATA.items():
+                    if city in candidate:
+                        dest_code = code
+                        dest_name = f"{city.title()} ({code})"
+                        break
 
     # 3. Check for explicit 'from <origin>' pattern
     if not origin_code:
         match_from = re.search(r"\b(?:from|leaving|departing|out of)\s+([a-zA-Z\s]+)", text_lower)
         if match_from:
             candidate = match_from.group(1).strip()
-            for city, code in CITY_TO_IATA.items():
-                if city in candidate:
-                    origin_code = code
-                    origin_name = f"{city.title()} ({code})"
-                    break
+            if len(candidate) == 3 and candidate.isalpha():
+                origin_code = candidate.upper()
+                city_disp = IATA_TO_CITY.get(origin_code, origin_code)
+                origin_name = f"{city_disp} ({origin_code})"
+            else:
+                for city, code in CITY_TO_IATA.items():
+                    if city in candidate:
+                        origin_code = code
+                        origin_name = f"{city.title()} ({code})"
+                        break
 
     # 4. Check standalone 3-letter IATA codes
-    iata_matches = re.findall(r"\b[A-Z]{3}\b", text)
-    if len(iata_matches) >= 2 and not origin_code and not dest_code:
-        origin_code, dest_code = iata_matches[0], iata_matches[1]
-        origin_name, dest_name = origin_code, dest_code
+    iata_matches = re.findall(r"\b[A-Za-z]{3}\b", text)
+    stopwords = {"the", "and", "for", "out", "any", "day", "who", "why", "how", "all", "via", "now", "see", "one", "two", "top", "get", "fly"}
+    valid_iatas = [c.upper() for c in iata_matches if c.lower() not in stopwords]
+    if len(valid_iatas) >= 2 and not origin_code and not dest_code:
+        origin_code, dest_code = valid_iatas[0], valid_iatas[1]
+        origin_name = f"{IATA_TO_CITY.get(origin_code, origin_code)} ({origin_code})"
+        dest_name = f"{IATA_TO_CITY.get(dest_code, dest_code)} ({dest_code})"
 
     # 5. Direct city scan if one or both are still missing
     for city, code in CITY_TO_IATA.items():
@@ -246,6 +277,25 @@ def flight_search_worker_node(state: ZicoGraphState | Dict[str, Any]) -> Dict[st
             flight_results = results
     except Exception as exc:
         logger.warning(f"Live flight search query notice ({exc}).")
+        return {
+            "messages": [
+                AIMessage(
+                    content=(
+                        f"Unable to retrieve live flight data from **{origin_name}** to **{dest_name}** "
+                        "at this moment due to a flight provider service error. Please try again shortly or try an alternative route."
+                    )
+                )
+            ],
+            "itinerary": itinerary,
+            "flight_search_results": {
+                "status": "ERROR",
+                "origin": {"name": origin_name, "iata": origin},
+                "destination": {"name": dest_name, "iata": destination},
+                "date": flight_date,
+                "flights": [],
+            },
+            "quick_actions": [],
+        }
 
     # Never fabricate flights if live API yields no results
     if not flight_results:
@@ -422,21 +472,20 @@ def research_worker_node(state: ZicoGraphState | Dict[str, Any]) -> Dict[str, An
         )
     else:
         response_text = (
-            f"Here are travel and accommodation options for **{loc_display}**{budget_phrase}:\n\n"
-            f"- Recommended verified properties and central accommodations are available in **{loc_display}**{budget_phrase}.\n\n"
-            "Would you like me to refine this search with specific dates or add an option to your itinerary?"
+            f"No verified travel or accommodation options were found for **{loc_display}**{budget_phrase} from our search providers. "
+            "Please verify the destination name or try alternative search parameters."
         )
 
     hotel_actions = [
-        {"id": "hotels", "label": "Find available hotels", "query": "Find available hotels"},
-        {"id": "compare_hotels", "label": "Compare options", "query": "Compare hotel options"},
-        {"id": "budget", "label": "Refine budget", "query": "Find cheaper options"},
-        {"id": "city_center", "label": "Near city center", "query": "Hotels near city center"},
+        {"id": "hotels", "label": f"Hotels in {loc_display}", "query": f"Hotels in {loc_display}"},
+        {"id": "attractions", "label": f"Attractions in {loc_display}", "query": f"What are the best places to visit in {loc_display}?"},
+        {"id": "itinerary", "label": f"Plan itinerary", "query": f"Help me plan a 3-day trip to {loc_display}"},
     ]
 
     return {
         "messages": [AIMessage(content=response_text)],
         "itinerary": itinerary,
+        "flight_search_results": {},
         "quick_actions": hotel_actions
     }
 

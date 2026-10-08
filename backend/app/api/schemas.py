@@ -232,6 +232,10 @@ class TravelRequest(BaseModel):
         default=None,
         description="Optional traveler location or departure point.",
     )
+    is_voice: Optional[bool] = Field(
+        default=False,
+        description="Optional flag indicating voice input.",
+    )
 
     model_config = ConfigDict(
         extra="forbid",

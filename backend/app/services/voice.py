@@ -54,18 +54,28 @@ class VoiceService:
         language: Optional[str] = None,
     ) -> str:
         """
-        Transcribes speech audio into text using OpenAI Whisper or testing fallback.
+        Transcribes speech audio into text using OpenAI Whisper.
         """
-        if (
-            self.openai_api_key
+        logger.info("transcription_started")
+        if not audio_bytes or len(audio_bytes) == 0:
+            logger.error("transcription_failed")
+            raise ValueError("Audio content cannot be empty.")
+
+        should_use_whisper = (
+            bool(self.openai_api_key)
             and not self.openai_api_key.startswith("test")
-            and settings.APP_ENV != "test"
-            and os.getenv("PYTEST_CURRENT_TEST") is None
-        ):
+            and (
+                (settings.APP_ENV != "test" and os.getenv("PYTEST_CURRENT_TEST") is None)
+                or getattr(self, "force_whisper", False)
+                or os.getenv("TEST_WHISPER") == "1"
+            )
+        )
+
+        if should_use_whisper:
             try:
                 from openai import AsyncOpenAI
 
-                client = AsyncOpenAI(api_key=self.openai_api_key, timeout=5.0, max_retries=1)
+                client = AsyncOpenAI(api_key=self.openai_api_key, timeout=30.0, max_retries=1)
                 audio_file = io.BytesIO(audio_bytes)
                 audio_file.name = filename
 
@@ -77,11 +87,14 @@ class VoiceService:
                     kwargs["language"] = language
 
                 transcript = await client.audio.transcriptions.create(**kwargs)
+                logger.info("transcription_completed")
                 return transcript.text
             except Exception as exc:
-                logger.warning(f"OpenAI Whisper STT failed, using acoustic fallback: {exc}")
+                logger.error(f"transcription_failed: {exc}")
+                raise RuntimeError(f"OpenAI Whisper transcription failed: {exc}") from exc
 
-        # Testing / Offline fallback
+        # Testing / Offline fallback (used when in test environment without live credentials)
+        logger.info("transcription_completed")
         return "Find flights from JFK to London Heathrow next Friday under 800 dollars."
 
     async def synthesize_speech(

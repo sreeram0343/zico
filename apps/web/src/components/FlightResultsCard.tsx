@@ -44,11 +44,11 @@ function getAirlineBadge(airline: string) {
 }
 
 export function FlightResultsCard({ flights }: FlightResultsCardProps) {
+  const [selectedFlight, setSelectedFlight] = useState<FlightOption | null>(null);
+
   if (!flights || flights.length === 0) {
     return null;
   }
-
-  const [selectedFlight, setSelectedFlight] = useState<FlightOption | null>(null);
 
   return (
     <div className="mt-4 bg-white rounded-2xl border border-[#E5E7EB] p-3 sm:p-4 shadow-sm w-full">

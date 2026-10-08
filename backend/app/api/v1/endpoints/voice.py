@@ -1,3 +1,4 @@
+import logging
 from typing import Optional
 
 from fastapi import APIRouter, File, Form, HTTPException, Response, UploadFile, status
@@ -5,6 +6,8 @@ from pydantic import BaseModel, Field
 
 from app.core.exceptions import sanitize_error_message
 from app.services.voice import get_voice_service
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -33,9 +36,11 @@ async def transcribe_audio_endpoint(
     Transcribes uploaded audio into text using OpenAI Whisper with audio processing.
     Enforces format validation and file size limits.
     """
+    logger.info("voice_upload_started")
     filename = file.filename or "audio.wav"
     ext = "." + filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
     if ext and ext not in ALLOWED_AUDIO_EXTENSIONS:
+        logger.error("voice_upload_failed: unsupported audio format")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Unsupported audio format '{ext}'. Supported formats: {sorted(ALLOWED_AUDIO_EXTENSIONS)}",
@@ -43,12 +48,20 @@ async def transcribe_audio_endpoint(
 
     try:
         content = await file.read()
+        if not content or len(content) == 0:
+            logger.error("voice_upload_failed: empty payload")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Audio content cannot be empty.",
+            )
         if len(content) > MAX_AUDIO_SIZE_BYTES:
+            logger.error("voice_upload_failed: payload too large")
             raise HTTPException(
                 status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
                 detail=f"Audio payload exceeds maximum permitted size of {MAX_AUDIO_SIZE_BYTES // (1024 * 1024)}MB.",
             )
 
+        logger.info("voice_upload_completed")
         voice_service = get_voice_service()
         transcript = await voice_service.transcribe_audio(
             audio_bytes=content,
@@ -61,6 +74,11 @@ async def transcribe_audio_endpoint(
         )
     except HTTPException:
         raise
+    except ValueError as val_err:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(val_err),
+        )
     except Exception as exc:
         safe_msg = sanitize_error_message(str(exc))
         raise HTTPException(

@@ -300,6 +300,8 @@ CITY_TO_IATA: Dict[str, str] = {
     "kolkata": "CCU",
     "kochi": "COK",
     "cochin": "COK",
+    "trivandrum": "TRV",
+    "thiruvananthapuram": "TRV",
     "goa": "GOI",
     "ahmedabad": "AMD",
     "jaipur": "JAI",
