@@ -364,6 +364,8 @@ class ZicoGraphState(BaseModel):
     flight_search_results: Dict[str, Any] = Field(default_factory=dict)
     quick_actions: List[Dict[str, str]] = Field(default_factory=list)
     next_node: Optional[str] = None
+    request_id: Optional[str] = None
+    session_id: Optional[str] = None
 
     def to_trip_state(self, title: str = "Active Journey") -> TripState:
         """Converts active graph runtime state into an authoritative TripState domain model."""

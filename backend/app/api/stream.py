@@ -3,6 +3,7 @@ import json
 import logging
 import sys
 import traceback
+import uuid
 from datetime import date, datetime
 from enum import Enum
 from typing import Any, Dict
@@ -11,6 +12,13 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.types import Command
 
+from app.core.exceptions import ProviderError, ZicoError, sanitize_error_message
+from app.core.request_context import (
+    clear_request_context,
+    get_request_id,
+    get_session_id,
+    set_request_context,
+)
 from app.graph.engine import graph_engine
 from app.services.voice import get_voice_service
 
@@ -105,6 +113,15 @@ async def websocket_stream_endpoint(websocket: WebSocket, trip_id: str):
                 continue
 
             # 3. Process the incoming request in an isolated try/except block
+            req_id = payload.get("request_id") or f"req_{uuid.uuid4().hex[:12]}"
+            sess_id = payload.get("session_id") or payload.get("trip_id") or trip_id
+            set_request_context(request_id=req_id, session_id=sess_id)
+            thread_config = {
+                "configurable": {"thread_id": trip_id},
+                "metadata": {"request_id": req_id, "session_id": sess_id},
+            }
+            has_emitted_assistant_message = False
+
             try:
                 msg_type = payload.get("type", "prompt")
                 user_id = payload.get("user_id", "default_traveler")
@@ -126,24 +143,65 @@ async def websocket_stream_endpoint(websocket: WebSocket, trip_id: str):
                     audio_b64 = payload.get("audio_base64", "")
                     if audio_b64:
                         try:
-                            logger.info("transcription_started transport=ws")
+                            logger.info(
+                                "transcription_started transport=ws request_id=%s session_id=%s",
+                                req_id,
+                                sess_id,
+                            )
                             audio_bytes = base64.b64decode(audio_b64)
-                            transcript = await voice_service.transcribe_audio(audio_bytes, filename="voice_input.webm")
-                            logger.info("transcription_completed transport=ws")
+                            transcript = await voice_service.transcribe_audio(
+                                audio_bytes, filename="voice_input.webm"
+                            )
+                            logger.info(
+                                "transcription_completed transport=ws request_id=%s session_id=%s",
+                                req_id,
+                                sess_id,
+                            )
                             await _safe_send_json(
                                 websocket,
                                 {
                                     "type": "transcript",
                                     "text": transcript,
                                     "content": transcript,
+                                    "request_id": req_id,
+                                    "session_id": sess_id,
                                 },
                             )
                             input_query = transcript
-                            logger.info("chat_from_voice_started transport=ws")
+                            logger.info(
+                                "chat_from_voice_started transport=ws request_id=%s session_id=%s",
+                                req_id,
+                                sess_id,
+                            )
                         except Exception as exc:
-                            logger.error("transcription_failed transport=ws error=%s", exc)
+                            logger.error(
+                                "transcription_failed transport=ws request_id=%s session_id=%s error=%s",
+                                req_id,
+                                sess_id,
+                                exc,
+                            )
+                            err_str = str(exc).lower()
+                            if any(
+                                k in err_str
+                                for k in [
+                                    "quota",
+                                    "429",
+                                    "insufficient_quota",
+                                    "credit_balance_exhausted",
+                                    "rate_limit",
+                                ]
+                            ):
+                                safe_voice_msg = "ZICO voice transcription is temporarily unavailable because the AI service quota is exhausted. Please type your query or try again later."
+                                status_code = 429
+                            elif any(k in err_str for k in ["timeout", "timed out"]):
+                                safe_voice_msg = "Voice transcription timed out while processing audio. Please try again."
+                                status_code = 504
+                            else:
+                                safe_voice_msg = "Voice transcription failed. Please try typing your request or try again."
+                                status_code = 500
+
                             print(
-                                f"[WS ERROR] Voice transcription error: {exc}",
+                                f"[WS ERROR] Voice transcription error: {sanitize_error_message(str(exc))}",
                                 file=sys.stderr,
                                 flush=True,
                             )
@@ -151,8 +209,13 @@ async def websocket_stream_endpoint(websocket: WebSocket, trip_id: str):
                                 websocket,
                                 {
                                     "type": "error",
-                                    "message": f"Speech transcription error: {str(exc)}",
-                                    "content": f"Speech transcription error: {str(exc)}",
+                                    "error_code": "ZICO_VOICE_ERROR",
+                                    "status_code": status_code,
+                                    "message": safe_voice_msg,
+                                    "content": safe_voice_msg,
+                                    "request_id": req_id,
+                                    "session_id": sess_id,
+                                    "trip_id": active_trip_id,
                                 },
                             )
                             continue
@@ -163,6 +226,8 @@ async def websocket_stream_endpoint(websocket: WebSocket, trip_id: str):
                         "messages": [HumanMessage(content=input_query)],
                         "trip_id": active_trip_id,
                         "user_id": user_id,
+                        "request_id": req_id,
+                        "session_id": sess_id,
                         "flight_search_results": {},
                         "quick_actions": [],
                     }
@@ -189,17 +254,23 @@ async def websocket_stream_endpoint(websocket: WebSocket, trip_id: str):
                 else:
                     if payload.get("is_voice"):
                         is_voice_turn = True
-                        logger.info("chat_from_voice_started transport=ws")
+                        logger.info(
+                            "chat_from_voice_started transport=ws request_id=%s session_id=%s",
+                            req_id,
+                            sess_id,
+                        )
                     input_query = user_content
                     target_input = {
                         "messages": [HumanMessage(content=input_query)],
                         "trip_id": active_trip_id,
                         "user_id": user_id,
+                        "request_id": req_id,
+                        "session_id": sess_id,
                         "flight_search_results": {},
                         "quick_actions": [],
                     }
 
-                print(f"[WS GRAPH] Starting stream for query: {input_query!r}", flush=True)
+                print(f"[WS GRAPH] Starting stream for query: {input_query!r} (request_id={req_id})", flush=True)
 
                 # Send initial status feedback
                 await _safe_send_json(
@@ -210,6 +281,8 @@ async def websocket_stream_endpoint(websocket: WebSocket, trip_id: str):
                         "node": "input_node",
                         "content": "Thinking...",
                         "message": f"Orchestrating request: '{input_query}'",
+                        "request_id": req_id,
+                        "session_id": sess_id,
                     },
                 )
 
@@ -241,6 +314,8 @@ async def websocket_stream_endpoint(websocket: WebSocket, trip_id: str):
                                     "node": node_candidate,
                                     "content": "Thinking...",
                                     "message": "Thinking...",
+                                    "request_id": req_id,
+                                    "session_id": sess_id,
                                 },
                             )
 
@@ -253,6 +328,8 @@ async def websocket_stream_endpoint(websocket: WebSocket, trip_id: str):
                                 "type": "tool_call",
                                 "tool": event_name,
                                 "input": _safe_serialize(tool_input),
+                                "request_id": req_id,
+                                "session_id": sess_id,
                             },
                         )
 
@@ -274,11 +351,14 @@ async def websocket_stream_endpoint(websocket: WebSocket, trip_id: str):
 
                         if chunk_text:
                             accumulated_ai_text += chunk_text
+                            has_emitted_assistant_message = True
                             await _safe_send_json(
                                 websocket,
                                 {
                                     "type": "token",
                                     "content": chunk_text,
+                                    "request_id": req_id,
+                                    "session_id": sess_id,
                                 },
                             )
 
@@ -305,6 +385,8 @@ async def websocket_stream_endpoint(websocket: WebSocket, trip_id: str):
                                         {
                                             "type": "state_update",
                                             "itinerary": serialized_itinerary,
+                                            "request_id": req_id,
+                                            "session_id": sess_id,
                                         },
                                     )
 
@@ -322,6 +404,8 @@ async def websocket_stream_endpoint(websocket: WebSocket, trip_id: str):
                                                 if isinstance(m.content, str)
                                                 else str(m.content)
                                             )
+                                if msg_snippet:
+                                    has_emitted_assistant_message = True
 
                                 # Extract flight_search_results and quick_actions from the node output if available
                                 output_flights = None
@@ -352,6 +436,8 @@ async def websocket_stream_endpoint(websocket: WebSocket, trip_id: str):
                                         "message": msg_snippet,
                                         "flight_search_results": current_flight_results,
                                         "quick_actions": current_quick_actions,
+                                        "request_id": req_id,
+                                        "session_id": sess_id,
                                     },
                                 )
                             except Exception as state_exc:
@@ -380,6 +466,8 @@ async def websocket_stream_endpoint(websocket: WebSocket, trip_id: str):
                                         "interrupt_value": _safe_serialize(inter.value),
                                         "prompt": prompt_msg,
                                         "content": prompt_msg,
+                                        "request_id": req_id,
+                                        "session_id": sess_id,
                                     },
                                 )
                 except Exception as interrupt_exc:
@@ -395,13 +483,47 @@ async def websocket_stream_endpoint(websocket: WebSocket, trip_id: str):
                             {
                                 "type": "voice_chunk",
                                 "audio_base64": audio_b64,
+                                "request_id": req_id,
+                                "session_id": sess_id,
                             },
                         )
                     except Exception as tts_exc:
                         logger.debug(f"TTS streaming notice: {tts_exc}")
 
+                # Verify assistant response was generated
+                if not accumulated_ai_text and not has_emitted_assistant_message:
+                    logger.warning(
+                        "Stream turn ended with empty assistant response for trip=%s request_id=%s session_id=%s",
+                        active_trip_id,
+                        req_id,
+                        sess_id,
+                    )
+                    print(
+                        f"[WS ERROR] Empty assistant response for trip: {active_trip_id}",
+                        file=sys.stderr,
+                        flush=True,
+                    )
+                    await _safe_send_json(
+                        websocket,
+                        {
+                            "type": "error",
+                            "error_code": "EMPTY_RESPONSE",
+                            "status_code": 500,
+                            "message": "ZICO is temporarily unable to process this request because the AI service is unavailable. Please try again later.",
+                            "content": "ZICO is temporarily unable to process this request because the AI service is unavailable. Please try again later.",
+                            "request_id": req_id,
+                            "session_id": sess_id,
+                            "trip_id": active_trip_id,
+                        },
+                    )
+                    continue
+
                 if is_voice_turn:
-                    logger.info("chat_from_voice_completed transport=ws")
+                    logger.info(
+                        "chat_from_voice_completed transport=ws request_id=%s session_id=%s",
+                        req_id,
+                        sess_id,
+                    )
 
                 # Signal turn completion
                 await _safe_send_json(
@@ -409,6 +531,8 @@ async def websocket_stream_endpoint(websocket: WebSocket, trip_id: str):
                     {
                         "type": "turn_complete",
                         "trip_id": active_trip_id,
+                        "request_id": req_id,
+                        "session_id": sess_id,
                     },
                 )
                 print(f"[WS SUCCESS] Completed stream turn for trip: {active_trip_id}", flush=True)
@@ -420,20 +544,75 @@ async def websocket_stream_endpoint(websocket: WebSocket, trip_id: str):
                 )
                 break
             except Exception as loop_err:
+                err_str = str(loop_err).lower()
+                is_quota = (
+                    (isinstance(loop_err, ProviderError) and "quota" in str(loop_err.message).lower())
+                    or any(
+                        k in err_str
+                        for k in [
+                            "insufficient_quota",
+                            "credit_balance_exhausted",
+                            "quota",
+                            "429",
+                            "rate_limit",
+                        ]
+                    )
+                )
+                is_timeout = (
+                    (isinstance(loop_err, ProviderError) and "timeout" in str(loop_err.message).lower())
+                    or any(k in err_str for k in ["timeout", "timed out"])
+                )
+
+                if is_quota:
+                    safe_error_msg = (
+                        "ZICO is temporarily unable to process this request because the AI service is unavailable. Please try again later."
+                    )
+                    error_code = "ZICO_PROVIDER_ERROR"
+                    status_code = 429
+                elif is_timeout:
+                    safe_error_msg = (
+                        "ZICO request timed out while contacting the AI service. Please try again later."
+                    )
+                    error_code = "ZICO_TIMEOUT_ERROR"
+                    status_code = 504
+                elif isinstance(loop_err, ZicoError):
+                    safe_error_msg = loop_err.safe_message
+                    error_code = loop_err.code
+                    status_code = loop_err.http_status_code
+                else:
+                    safe_error_msg = (
+                        "An unexpected error occurred while processing the travel request."
+                    )
+                    error_code = "ZICO_INTERNAL_ERROR"
+                    status_code = 500
+
+                clean_err_desc = sanitize_error_message(str(loop_err))
                 print(
-                    f"[WS ERROR] Error in stream processing: {loop_err}",
+                    f"[WS ERROR] Error in stream processing: {clean_err_desc}",
                     file=sys.stderr,
                     flush=True,
                 )
-                traceback.print_exc()
-                logger.error(f"Error during graph execution stream: {loop_err}", exc_info=True)
+                logger.error(
+                    "Error during graph execution stream trip=%s request_id=%s session_id=%s error_type=%s: %s",
+                    active_trip_id,
+                    req_id,
+                    sess_id,
+                    type(loop_err).__name__,
+                    clean_err_desc,
+                    exc_info=True,
+                )
                 try:
                     await _safe_send_json(
                         websocket,
                         {
                             "type": "error",
-                            "message": str(loop_err),
-                            "content": str(loop_err),
+                            "error_code": error_code,
+                            "status_code": status_code,
+                            "message": safe_error_msg,
+                            "content": safe_error_msg,
+                            "request_id": req_id,
+                            "session_id": sess_id,
+                            "trip_id": active_trip_id,
                         },
                     )
                 except Exception:
@@ -442,21 +621,26 @@ async def websocket_stream_endpoint(websocket: WebSocket, trip_id: str):
     except WebSocketDisconnect:
         print(f"[WS CLOSED] Connection closed cleanly for trip: {trip_id}", flush=True)
     except Exception as global_err:
+        clean_global_err = sanitize_error_message(str(global_err))
         print(
-            f"[WS FATAL] Global WebSocket handler exception: {global_err}",
+            f"[WS FATAL] Global WebSocket handler exception: {clean_global_err}",
             file=sys.stderr,
             flush=True,
         )
         traceback.print_exc()
-        logger.error(f"Global WebSocket handler exception: {global_err}", exc_info=True)
+        logger.error(f"Global WebSocket handler exception: {clean_global_err}", exc_info=True)
         try:
             await _safe_send_json(
                 websocket,
                 {
                     "type": "error",
-                    "message": str(global_err),
-                    "content": str(global_err),
+                    "error_code": "ZICO_INTERNAL_ERROR",
+                    "status_code": 500,
+                    "message": "An internal server error occurred.",
+                    "content": "An internal server error occurred.",
                 },
             )
         except Exception:
             pass
+    finally:
+        clear_request_context()

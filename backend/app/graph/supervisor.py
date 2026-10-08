@@ -165,17 +165,20 @@ def supervisor_node(state: Dict[str, Any] | Any) -> Dict[str, Any]:
     if not messages:
         messages = [HumanMessage(content="Hello ZICO")]
 
-    from app.rag.service import _openai_quota_exhausted
+    from app.core.exceptions import ProviderError
+    from app.core.request_context import get_request_id, get_session_id, set_request_context
+
+    req_id = (state.get("request_id") if isinstance(state, dict) else getattr(state, "request_id", None)) or get_request_id()
+    sess_id = (state.get("session_id") if isinstance(state, dict) else getattr(state, "session_id", None)) or get_session_id()
+    if req_id or sess_id:
+        set_request_context(request_id=req_id, session_id=sess_id)
 
     is_mocked = hasattr(ChatOpenAI, "assert_called") or "mock" in type(ChatOpenAI).__module__
-    if not _openai_quota_exhausted and (
-        is_mocked
-        or (
-            settings.OPENAI_API_KEY
-            and not settings.OPENAI_API_KEY.startswith("test")
-            and settings.APP_ENV != "test"
-            and os.getenv("PYTEST_CURRENT_TEST") is None
-        )
+    if is_mocked or (
+        settings.OPENAI_API_KEY
+        and not settings.OPENAI_API_KEY.startswith("test")
+        and settings.APP_ENV != "test"
+        and os.getenv("PYTEST_CURRENT_TEST") is None
     ):
         try:
             llm = ChatOpenAI(
@@ -204,10 +207,22 @@ def supervisor_node(state: Dict[str, Any] | Any) -> Dict[str, Any]:
                 next_step = _classify_intent_heuristically(latest_user_text)
 
         except Exception as exc:
-            if "quota" in str(exc).lower() or "429" in str(exc):
-                import app.rag.service
+            err_str = str(exc).lower()
+            if any(k in err_str for k in ["quota", "429", "insufficient_quota", "credit_balance_exhausted", "rate_limit"]):
+                logger.error("OpenAI quota exhausted during supervisor routing: %s", exc)
+                raise ProviderError(
+                    "OpenAI quota exhausted",
+                    safe_message="ZICO is temporarily unable to process this request because the AI service is unavailable. Please try again later.",
+                    details={"provider": "openai", "error_type": "insufficient_quota"},
+                ) from exc
+            if any(k in err_str for k in ["timeout", "timed out"]):
+                logger.error("OpenAI timeout during supervisor routing: %s", exc)
+                raise ProviderError(
+                    "OpenAI request timed out",
+                    safe_message="ZICO request timed out while contacting the AI service. Please try again later.",
+                    details={"provider": "openai", "error_type": "timeout"},
+                ) from exc
 
-                app.rag.service._openai_quota_exhausted = True
             logger.warning(
                 f"LLM supervisor invocation notice: {exc}. Using deterministic intent routing."
             )

@@ -4,7 +4,7 @@ from typing import Optional
 from fastapi import APIRouter, File, Form, HTTPException, Response, UploadFile, status
 from pydantic import BaseModel, Field
 
-from app.core.exceptions import sanitize_error_message
+from app.core.exceptions import ProviderError, ZicoError, sanitize_error_message
 from app.services.voice import get_voice_service
 
 logger = logging.getLogger(__name__)
@@ -79,7 +79,31 @@ async def transcribe_audio_endpoint(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(val_err),
         )
+    except ProviderError as prov_err:
+        status_code = (
+            status.HTTP_429_TOO_MANY_REQUESTS
+            if "quota" in prov_err.message.lower()
+            else status.HTTP_503_SERVICE_UNAVAILABLE
+        )
+        raise HTTPException(
+            status_code=status_code,
+            detail=prov_err.safe_message,
+        )
+    except ZicoError as zico_err:
+        raise HTTPException(
+            status_code=zico_err.http_status_code,
+            detail=zico_err.safe_message,
+        )
     except Exception as exc:
+        err_str = str(exc).lower()
+        if any(
+            k in err_str
+            for k in ["quota", "429", "insufficient_quota", "credit_balance_exhausted"]
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="Voice transcription is temporarily unavailable because the AI service quota is exhausted. Please type your query or try again later.",
+            )
         safe_msg = sanitize_error_message(str(exc))
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

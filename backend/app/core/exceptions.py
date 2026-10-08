@@ -228,7 +228,7 @@ class AgentError(ZicoError):
     default_safe_message: str = "An error occurred while executing the travel agent."
 
 
-class ProviderError(ZicoError):
+class ProviderError(ZicoError, RuntimeError):
     """Raised when an external model or service provider (e.g. OpenAI) is unavailable or fails."""
 
     code: str = ErrorCode.PROVIDER_ERROR

@@ -63,6 +63,9 @@ export function Timeline({
   const flightResultsRef = useRef<any>(null);
   const quickActionsRef = useRef<any[] | null>(null);
   const isVoiceTurnRef = useRef<boolean>(false);
+  const turnProducedResponseRef = useRef<boolean>(false);
+  const isProcessingRef = useRef<boolean>(false);
+  const requestTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const [activeToolCall, setActiveToolCall] = useState<{ tool: string; input?: any } | null>(null);
   const [streamError, setStreamError] = useState<string | null>(null);
 
@@ -176,6 +179,11 @@ export function Timeline({
             ]);
             flightResultsRef.current = null;
             quickActionsRef.current = null;
+            turnProducedResponseRef.current = true;
+            if (requestTimeoutRef.current) {
+              clearTimeout(requestTimeoutRef.current);
+              requestTimeoutRef.current = null;
+            }
           }
         }
 
@@ -183,6 +191,7 @@ export function Timeline({
         else if (streamEvent.type === 'interrupt' && streamEvent.interrupt_value) {
           setActiveInterrupt(streamEvent.interrupt_value);
           setIsProcessing(false);
+          isProcessingRef.current = false;
           setActiveToolCall(null);
         }
 
@@ -198,6 +207,10 @@ export function Timeline({
 
         // 8. Turn completion
         else if (streamEvent.type === 'turn_complete') {
+          if (requestTimeoutRef.current) {
+            clearTimeout(requestTimeoutRef.current);
+            requestTimeoutRef.current = null;
+          }
           if (streamingTokenRef.current) {
             const finalTokenContent = streamingTokenRef.current;
             setMessages((prev) => [
@@ -214,22 +227,54 @@ export function Timeline({
             setStreamingTokenMessage('');
             flightResultsRef.current = null;
             quickActionsRef.current = null;
+            turnProducedResponseRef.current = true;
+          } else if (!turnProducedResponseRef.current) {
+            const emptyNotice =
+              'ZICO is temporarily unable to process this request because the AI service is unavailable. Please try again later.';
+            setMessages((prev) => [
+              ...prev,
+              {
+                role: 'assistant',
+                text: emptyNotice,
+                time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+              },
+            ]);
+            turnProducedResponseRef.current = true;
           }
           if (isVoiceTurnRef.current) {
             console.log('chat_from_voice_completed');
             isVoiceTurnRef.current = false;
           }
           setIsProcessing(false);
+          isProcessingRef.current = false;
           setActiveWorkerNode(null);
           setActiveToolCall(null);
         }
 
         // 9. Error frame
         else if (streamEvent.type === 'error') {
-          const errText = streamEvent.message || streamEvent.content || 'An error occurred';
+          if (requestTimeoutRef.current) {
+            clearTimeout(requestTimeoutRef.current);
+            requestTimeoutRef.current = null;
+          }
+          const errText =
+            streamEvent.message ||
+            streamEvent.content ||
+            'ZICO is temporarily unable to process this request because the AI service is unavailable. Please try again later.';
           setStreamError(errText);
+          setMessages((prev) => [
+            ...prev,
+            {
+              role: 'assistant',
+              text: errText,
+              time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            },
+          ]);
+          turnProducedResponseRef.current = true;
           isVoiceTurnRef.current = false;
           setIsProcessing(false);
+          isProcessingRef.current = false;
+          setActiveWorkerNode(null);
           setActiveToolCall(null);
         }
       };
@@ -238,10 +283,50 @@ export function Timeline({
         setIsConnected(false);
         setActiveWorkerNode(null);
         setActiveToolCall(null);
+        if (requestTimeoutRef.current) {
+          clearTimeout(requestTimeoutRef.current);
+          requestTimeoutRef.current = null;
+        }
+        if (isProcessingRef.current && !turnProducedResponseRef.current) {
+          const discText =
+            'Connection to ZICO service was lost. Please check your connection and try again.';
+          setMessages((prev) => [
+            ...prev,
+            {
+              role: 'assistant',
+              text: discText,
+              time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            },
+          ]);
+          setStreamError(discText);
+          setIsProcessing(false);
+          isProcessingRef.current = false;
+          turnProducedResponseRef.current = true;
+        }
       };
 
       ws.onerror = () => {
         setIsConnected(false);
+        if (requestTimeoutRef.current) {
+          clearTimeout(requestTimeoutRef.current);
+          requestTimeoutRef.current = null;
+        }
+        if (isProcessingRef.current && !turnProducedResponseRef.current) {
+          const netErrText =
+            'ZICO network connection encountered an error. Please try again.';
+          setMessages((prev) => [
+            ...prev,
+            {
+              role: 'assistant',
+              text: netErrText,
+              time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            },
+          ]);
+          setStreamError(netErrText);
+          setIsProcessing(false);
+          isProcessingRef.current = false;
+          turnProducedResponseRef.current = true;
+        }
       };
 
       setSocket(ws);
@@ -358,13 +443,36 @@ export function Timeline({
               }
             } else {
               const errData = await resp.json().catch(() => null);
-              const errMsg = errData?.detail || `Audio transcription failed on server (Status ${resp.status}).`;
+              const isQuota =
+                resp.status === 429 ||
+                (errData?.detail && String(errData.detail).toLowerCase().includes('quota'));
+              const errMsg = isQuota
+                ? 'Voice transcription is temporarily unavailable because the AI service quota is exhausted. Please type your query or try again later.'
+                : (errData?.detail || `Audio transcription failed on server (Status ${resp.status}).`);
               setStreamError(errMsg);
+              setMessages((prev) => [
+                ...prev,
+                {
+                  role: 'assistant',
+                  text: errMsg,
+                  time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                },
+              ]);
             }
           } catch (err) {
-            setStreamError(`Voice service error: ${String(err)}`);
+            const voiceErr = `Voice service error: ${String(err)}`;
+            setStreamError(voiceErr);
+            setMessages((prev) => [
+              ...prev,
+              {
+                role: 'assistant',
+                text: voiceErr,
+                time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+              },
+            ]);
           } finally {
             setIsProcessing(false);
+            isProcessingRef.current = false;
             setIsRecording(false);
           }
         };
@@ -393,6 +501,8 @@ export function Timeline({
     streamingTokenRef.current = '';
     setStreamingTokenMessage('');
     setActiveToolCall(null);
+    turnProducedResponseRef.current = false;
+    isProcessingRef.current = true;
 
     setMessages((prev) => [
       ...prev,
@@ -405,13 +515,39 @@ export function Timeline({
     setPromptInput('');
     setIsProcessing(true);
 
+    const generatedReqId = `req_${Math.random().toString(36).substring(2, 14)}`;
+
     if (socket && isConnected && socket.readyState === WebSocket.OPEN) {
+      if (requestTimeoutRef.current) {
+        clearTimeout(requestTimeoutRef.current);
+      }
+      requestTimeoutRef.current = setTimeout(() => {
+        if (isProcessingRef.current && !turnProducedResponseRef.current) {
+          const timeoutText =
+            'ZICO request timed out while waiting for a response. Please try again.';
+          setMessages((prev) => [
+            ...prev,
+            {
+              role: 'assistant',
+              text: timeoutText,
+              time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            },
+          ]);
+          setStreamError(timeoutText);
+          setIsProcessing(false);
+          isProcessingRef.current = false;
+          turnProducedResponseRef.current = true;
+        }
+      }, 45000);
+
       socket.send(
         JSON.stringify({
           type: 'prompt',
           message: text,
           content: text,
           trip_id: tripId,
+          session_id: tripId,
+          request_id: generatedReqId,
           user_id: userId,
           enable_tts: true,
           is_voice: Boolean(isFromVoice),
@@ -426,6 +562,7 @@ export function Timeline({
             message: text,
             session_id: tripId,
             trip_id: tripId,
+            request_id: generatedReqId,
             user_id: userId,
             is_voice: Boolean(isFromVoice),
           }),
@@ -448,19 +585,47 @@ export function Timeline({
               sources: data.sources || [],
             },
           ]);
+          turnProducedResponseRef.current = true;
           if (isVoiceTurnRef.current) {
             console.log('chat_from_voice_completed');
             isVoiceTurnRef.current = false;
           }
         } else {
           isVoiceTurnRef.current = false;
-          setStreamError(`Server request failed (Status: ${resp.status})`);
+          const errData = await resp.json().catch(() => null);
+          const isQuota =
+            resp.status === 429 ||
+            (errData?.detail && String(errData.detail).toLowerCase().includes('quota'));
+          const fallbackErrMsg = isQuota
+            ? 'ZICO is temporarily unable to process this request because the AI service is unavailable. Please try again later.'
+            : (errData?.detail || `Server request failed (Status: ${resp.status})`);
+          setStreamError(fallbackErrMsg);
+          setMessages((prev) => [
+            ...prev,
+            {
+              role: 'assistant',
+              text: fallbackErrMsg,
+              time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            },
+          ]);
+          turnProducedResponseRef.current = true;
         }
       } catch (err) {
         isVoiceTurnRef.current = false;
-        setStreamError(`Network connection error: ${String(err)}`);
+        const netErr = `Network connection error: ${String(err)}`;
+        setStreamError(netErr);
+        setMessages((prev) => [
+          ...prev,
+          {
+            role: 'assistant',
+            text: netErr,
+            time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          },
+        ]);
+        turnProducedResponseRef.current = true;
       } finally {
         setIsProcessing(false);
+        isProcessingRef.current = false;
       }
     }
   };

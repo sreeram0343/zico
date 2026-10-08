@@ -182,8 +182,20 @@ def _extract_airports(text: str) -> tuple[str, str, str, str]:
 
 def input_node(state: ZicoGraphState | Dict[str, Any]) -> Dict[str, Any]:
     """
-    Parses, validates, and normalizes incoming message state.
+    Parses, validates, and normalizes incoming message state, establishing request context.
     """
+    from app.core.request_context import get_request_id, get_session_id, set_request_context
+
+    req_id = (
+        state.get("request_id") if isinstance(state, dict) else getattr(state, "request_id", None)
+    ) or get_request_id() or f"req_{uuid.uuid4().hex[:12]}"
+    sess_id = (
+        state.get("session_id") if isinstance(state, dict) else getattr(state, "session_id", None)
+    ) or (
+        state.get("trip_id") if isinstance(state, dict) else getattr(state, "trip_id", None)
+    ) or get_session_id() or f"sess_{uuid.uuid4().hex[:12]}"
+    set_request_context(request_id=req_id, session_id=sess_id)
+
     if isinstance(state, dict):
         messages = state.get("messages", [])
     else:
@@ -205,7 +217,13 @@ def input_node(state: ZicoGraphState | Dict[str, Any]) -> Dict[str, Any]:
         elif isinstance(msg, BaseMessage):
             normalized_messages.append(msg)
 
-    return {"messages": normalized_messages, "flight_search_results": {}, "quick_actions": []}
+    return {
+        "messages": normalized_messages,
+        "flight_search_results": {},
+        "quick_actions": [],
+        "request_id": req_id,
+        "session_id": sess_id,
+    }
 
 
 def flight_search_worker_node(state: ZicoGraphState | Dict[str, Any]) -> Dict[str, Any]:

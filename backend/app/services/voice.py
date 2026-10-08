@@ -90,8 +90,36 @@ class VoiceService:
                 logger.info("transcription_completed")
                 return transcript.text
             except Exception as exc:
-                logger.error(f"transcription_failed: {exc}")
-                raise RuntimeError(f"OpenAI Whisper transcription failed: {exc}") from exc
+                err_str = str(exc).lower()
+                logger.error("transcription_failed: %s", exc)
+                from app.core.exceptions import ProviderError
+
+                if any(
+                    k in err_str
+                    for k in [
+                        "quota",
+                        "429",
+                        "insufficient_quota",
+                        "credit_balance_exhausted",
+                        "rate_limit",
+                    ]
+                ):
+                    raise ProviderError(
+                        f"OpenAI Whisper transcription failed: {exc}",
+                        safe_message="Voice transcription is temporarily unavailable because the AI service quota is exhausted. Please type your query or try again later.",
+                        details={"provider": "openai", "service": "whisper", "error_type": "insufficient_quota"},
+                    ) from exc
+                if any(k in err_str for k in ["timeout", "timed out"]):
+                    raise ProviderError(
+                        f"OpenAI Whisper transcription failed: {exc}",
+                        safe_message="Voice transcription timed out while processing audio. Please try again.",
+                        details={"provider": "openai", "service": "whisper", "error_type": "timeout"},
+                    ) from exc
+                raise ProviderError(
+                    f"OpenAI Whisper transcription failed: {exc}",
+                    safe_message="Voice transcription encountered an error. Please try again or type your query.",
+                    details={"provider": "openai", "service": "whisper"},
+                ) from exc
 
         # Testing / Offline fallback (used when in test environment without live credentials)
         logger.info("transcription_completed")
